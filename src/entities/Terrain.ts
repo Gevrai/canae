@@ -10,4 +10,9 @@ export class Terrain {
     this.col = col;
     this.row = row;
   }
+
+  get movementCost(): number { return this.def.movementCost; }
+  get defenseModifier(): number { return this.def.defenseBonus; }
+  get blocksLoS(): boolean { return this.def.blocksLoS; }
+  get passable(): boolean { return this.def.passable; }
 }

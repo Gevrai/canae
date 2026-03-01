@@ -1,17 +1,20 @@
 import Phaser from 'phaser';
+import { MapSystem } from '../systems/MapSystem';
+import { CameraSystem } from '../systems/CameraSystem';
 
 export class BattleScene extends Phaser.Scene {
+  private cameraSystem!: CameraSystem;
+
   constructor() {
     super({ key: 'BattleScene' });
   }
 
   create(): void {
-    const { width, height } = this.scale;
+    const mapSystem = new MapSystem(this);
+    this.cameraSystem = new CameraSystem(this, mapSystem.mapWidthPx, mapSystem.mapHeightPx);
+  }
 
-    this.add.text(width / 2, height / 2, 'Battle Scene', {
-      fontSize: '48px',
-      color: '#ffffff',
-      fontFamily: 'Georgia, serif',
-    }).setOrigin(0.5);
+  update(): void {
+    this.cameraSystem.update();
   }
 }

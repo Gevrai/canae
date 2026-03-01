@@ -15,9 +15,10 @@ export class CombatSystem {
 
   resolve(attacker: Unit, defender: Unit): CombatResult {
     const terrain = this.map.getTerrain(defender.col, defender.row);
-    const defenseBonus = terrain?.defenseBonus ?? 0;
+    const defenseMultiplier = 1 + (terrain?.defenseBonus ?? 0);
 
-    const attackerDamage = Math.max(1, attacker.attack - defender.defense - defenseBonus);
+    const effectiveDefense = Math.floor(defender.defense * defenseMultiplier);
+    const attackerDamage = Math.max(1, attacker.attack - effectiveDefense);
     const defenderDamage = Math.max(1, defender.attack - attacker.defense);
 
     defender.hp -= attackerDamage;
