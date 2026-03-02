@@ -168,6 +168,11 @@ export class MovementSystem {
         unit.isMoving = false;
         unit.moved = true;
         unit.currentPath = [];
+        unit.lastMoveTime = this.scene.time.now;
+        unit.tilesMoved = steps.length;
+        if (unit.unitType === 'cavalry' && steps.length >= 3) {
+          unit.hasChargeBonus = true;
+        }
         return;
       }
 

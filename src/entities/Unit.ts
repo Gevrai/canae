@@ -24,6 +24,11 @@ export class Unit {
   public currentPath: { col: number; row: number }[] = [];
   public moved = false;
   public readonly team: number;
+  public lastMoveTime = 0;
+  public tilesMoved = 0;
+  public isRouting = false;
+  public hasChargeBonus = false;
+  public attackTargetId: number | null = null;
 
   constructor(def: UnitDef, col: number, row: number, faction: Faction) {
     this.id = nextUnitId++;
