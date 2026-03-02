@@ -149,16 +149,26 @@ export class UnitPanel {
     g.lineStyle(2, 0xddc8a8, 0.9);
     switch (type) {
       case 'infantry':
-        g.beginPath(); g.moveTo(cx, cy - 8); g.lineTo(cx, cy + 8); g.strokePath();
-        g.beginPath(); g.moveTo(cx - 5, cy); g.lineTo(cx + 5, cy); g.strokePath();
+        g.beginPath(); g.moveTo(cx - 6, cy - 7); g.lineTo(cx + 6, cy + 7); g.strokePath();
+        g.beginPath(); g.moveTo(cx + 6, cy - 7); g.lineTo(cx - 6, cy + 7); g.strokePath();
+        g.lineStyle(1.5, 0xddc8a8, 0.7);
+        g.beginPath(); g.moveTo(cx - 3, cy - 1); g.lineTo(cx - 6, cy + 2); g.strokePath();
+        g.beginPath(); g.moveTo(cx + 3, cy - 1); g.lineTo(cx + 6, cy + 2); g.strokePath();
         break;
       case 'cavalry':
         g.beginPath(); g.moveTo(cx - 6, cy - 5); g.lineTo(cx + 4, cy); g.lineTo(cx - 6, cy + 5); g.strokePath();
         g.beginPath(); g.moveTo(cx - 1, cy - 5); g.lineTo(cx + 9, cy); g.lineTo(cx - 1, cy + 5); g.strokePath();
         break;
       case 'archer':
-        g.beginPath(); g.arc(cx - 2, cy, 8, -1.2, 1.2, false); g.strokePath();
-        g.beginPath(); g.moveTo(cx - 2, cy); g.lineTo(cx + 8, cy); g.strokePath();
+        g.beginPath(); g.arc(cx - 3, cy, 9, -1.3, 1.3, false); g.strokePath();
+        g.lineStyle(1, 0xddc8a8, 0.5);
+        g.beginPath();
+        g.moveTo(cx - 3 + 9 * Math.cos(-1.3), cy + 9 * Math.sin(-1.3));
+        g.lineTo(cx - 3 + 9 * Math.cos(1.3), cy + 9 * Math.sin(1.3));
+        g.strokePath();
+        g.lineStyle(2, 0xddc8a8, 0.9);
+        g.beginPath(); g.moveTo(cx - 3, cy); g.lineTo(cx + 9, cy); g.strokePath();
+        g.beginPath(); g.moveTo(cx + 6, cy - 3); g.lineTo(cx + 9, cy); g.lineTo(cx + 6, cy + 3); g.strokePath();
         break;
     }
   }

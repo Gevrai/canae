@@ -77,7 +77,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Version
-    this.add.text(width - 10, height - 10, 'v0.7', {
+    this.add.text(width - 10, height - 10, 'v0.8', {
       fontSize: '12px',
       color: '#b0a080',
       fontFamily: 'Georgia, serif',
@@ -167,20 +167,21 @@ export class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     const container = this.add.container(x, y, [bg, txt]);
-    const hitZone = this.add.zone(x, y, bw, bh).setInteractive({ useHandCursor: true });
+    container.setSize(bw, bh);
+    container.setInteractive({ useHandCursor: true });
 
-    hitZone.on('pointerover', () => {
+    container.on('pointerover', () => {
       this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, true);
       txt.setColor('#2a1a0a');
     });
-    hitZone.on('pointerout', () => {
+    container.on('pointerout', () => {
       this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, false);
       txt.setColor('#4a3520');
     });
-    hitZone.on('pointerdown', () => {
+    container.on('pointerdown', () => {
       container.setScale(0.96);
     });
-    hitZone.on('pointerup', () => {
+    container.on('pointerup', () => {
       container.setScale(1);
       callback();
     });
@@ -285,14 +286,13 @@ export class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     const btnContainer = this.add.container(x, y, [bg, txt]);
+    btnContainer.setSize(bw, bh);
+    btnContainer.setInteractive({ useHandCursor: true });
+    btnContainer.on('pointerover', () => { this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, true); txt.setColor('#2a1a0a'); });
+    btnContainer.on('pointerout', () => { this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, false); txt.setColor('#4a3520'); });
+    btnContainer.on('pointerdown', () => { btnContainer.setScale(0.96); });
+    btnContainer.on('pointerup', () => { btnContainer.setScale(1); callback(); });
     container.add(btnContainer);
-
-    const hitZone = this.add.zone(x, y, bw, bh).setInteractive({ useHandCursor: true });
-    hitZone.on('pointerover', () => { this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, true); txt.setColor('#2a1a0a'); });
-    hitZone.on('pointerout', () => { this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, false); txt.setColor('#4a3520'); });
-    hitZone.on('pointerdown', () => { btnContainer.setScale(0.96); });
-    hitZone.on('pointerup', () => { btnContainer.setScale(1); callback(); });
-    container.add(hitZone);
   }
 
   private showCreateGame(): void {

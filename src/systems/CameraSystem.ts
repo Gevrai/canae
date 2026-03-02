@@ -87,4 +87,8 @@ export class CameraSystem {
     if (this.cursors.up.isDown) cam.scrollY -= speed;
     if (this.cursors.down.isDown) cam.scrollY += speed;
   }
+
+  panTo(worldX: number, worldY: number, duration = 800): void {
+    this.scene.cameras.main.pan(worldX, worldY, duration, 'Power2');
+  }
 }

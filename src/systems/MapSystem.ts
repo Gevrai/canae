@@ -188,60 +188,75 @@ export class MapSystem {
   }
 
   private drawHillContours(g: Phaser.GameObjects.Graphics, x: number, y: number, rng: () => number): void {
-    g.lineStyle(1, 0x9a8a6a, 0.4);
-    for (let i = 0; i < 3; i++) {
-      const cy = y + 15 + i * 14 + rng() * 4;
-      const cx = x + 10 + rng() * 8;
+    g.lineStyle(0.8, 0x9a8a6a, 0.35);
+    for (let i = 0; i < 4; i++) {
+      const cy = y + 14 + i * 11 + rng() * 3;
+      const cx = x + 8 + rng() * 6;
       g.beginPath();
-      g.arc(cx + 22, cy, 18 - i * 3, Math.PI, 0, false);
+      g.arc(cx + 24, cy, 20 - i * 4, Math.PI * 0.85, Math.PI * 0.15, false);
       g.strokePath();
     }
+    // Peak marker
+    g.fillStyle(0x9a8a6a, 0.2);
+    g.fillCircle(x + 32, y + 12 + rng() * 4, 2);
   }
 
   private drawTreeSymbols(g: Phaser.GameObjects.Graphics, x: number, y: number, rng: () => number): void {
     const count = 2 + Math.floor(rng() * 3);
     for (let i = 0; i < count; i++) {
       const tx = x + 10 + rng() * 44;
-      const ty = y + 14 + rng() * 36;
+      const ty = y + 12 + rng() * 32;
+      const r = 4 + rng() * 3;
+      // Trunk
+      g.lineStyle(1.5, 0x5a5030, 0.45);
+      g.beginPath();
+      g.moveTo(tx, ty + r * 0.7);
+      g.lineTo(tx, ty + r + 5);
+      g.strokePath();
+      // Crown
       g.fillStyle(0x6b7a4b, 0.7);
-      g.fillCircle(tx, ty, 4 + rng() * 3);
-      g.fillStyle(0x5a6940, 0.5);
-      g.fillCircle(tx - 1, ty - 1, 2.5);
+      g.fillCircle(tx, ty, r);
+      g.fillStyle(0x5a6940, 0.4);
+      g.fillCircle(tx - 1, ty - 1, r * 0.6);
     }
   }
 
   private drawWaterWaves(g: Phaser.GameObjects.Graphics, x: number, y: number, rng: () => number): void {
-    g.lineStyle(1, 0x6892a5, 0.35);
-    for (let i = 0; i < 3; i++) {
-      const wy = y + 16 + i * 16;
-      const wx = x + 6 + rng() * 4;
+    g.lineStyle(1, 0x6892a5, 0.4);
+    for (let i = 0; i < 4; i++) {
+      const wy = y + 10 + i * 13;
+      const wx = x + 4 + rng() * 6;
       g.beginPath();
       g.moveTo(wx, wy);
-      g.lineTo(wx + 10, wy - 3);
-      g.lineTo(wx + 20, wy);
-      g.lineTo(wx + 30, wy - 3);
-      g.lineTo(wx + 40, wy);
+      g.lineTo(wx + 8, wy - 4);
+      g.lineTo(wx + 16, wy);
+      g.lineTo(wx + 24, wy - 4);
+      g.lineTo(wx + 32, wy);
+      g.lineTo(wx + 40, wy - 4);
+      g.lineTo(wx + 48, wy);
       g.strokePath();
     }
   }
 
   private drawRoadPath(g: Phaser.GameObjects.Graphics, x: number, y: number): void {
-    g.lineStyle(3, 0xc8b898, 0.5);
+    // Road edges
+    g.lineStyle(1.5, 0xa09070, 0.5);
     g.beginPath();
-    g.moveTo(x, y + TILE_SIZE / 2);
-    g.lineTo(x + TILE_SIZE, y + TILE_SIZE / 2);
-    g.strokePath();
-
-    // Dashed edge lines
-    g.lineStyle(1, 0xb0a080, 0.3);
-    g.beginPath();
-    g.moveTo(x, y + TILE_SIZE / 2 - 8);
-    g.lineTo(x + TILE_SIZE, y + TILE_SIZE / 2 - 8);
+    g.moveTo(x, y + TILE_SIZE / 2 - 10);
+    g.lineTo(x + TILE_SIZE, y + TILE_SIZE / 2 - 10);
     g.strokePath();
     g.beginPath();
-    g.moveTo(x, y + TILE_SIZE / 2 + 8);
-    g.lineTo(x + TILE_SIZE, y + TILE_SIZE / 2 + 8);
+    g.moveTo(x, y + TILE_SIZE / 2 + 10);
+    g.lineTo(x + TILE_SIZE, y + TILE_SIZE / 2 + 10);
     g.strokePath();
+    // Center dashes
+    g.lineStyle(1, 0xb0a080, 0.35);
+    for (let dx = 4; dx < TILE_SIZE; dx += 14) {
+      g.beginPath();
+      g.moveTo(x + dx, y + TILE_SIZE / 2);
+      g.lineTo(x + dx + 7, y + TILE_SIZE / 2);
+      g.strokePath();
+    }
   }
 
   private drawMudSpeckles(g: Phaser.GameObjects.Graphics, x: number, y: number, rng: () => number): void {
@@ -305,13 +320,14 @@ export class MapSystem {
       overlay.fillRect(w - i - 1, 0, 1, h);
     }
 
-    // Subtle noise speckles for texture
+    // Parchment grain noise
     const rng = mulberry32(777);
-    overlay.fillStyle(0x6b5b3a, 0.03);
-    for (let i = 0; i < 600; i++) {
+    for (let i = 0; i < 1200; i++) {
       const sx = rng() * w;
       const sy = rng() * h;
-      overlay.fillCircle(sx, sy, 0.5 + rng() * 1.5);
+      const shade = rng() > 0.5 ? 0x6b5b3a : 0xf0e8d8;
+      overlay.fillStyle(shade, 0.02 + rng() * 0.02);
+      overlay.fillCircle(sx, sy, 0.3 + rng() * 1.2);
     }
   }
 

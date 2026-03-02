@@ -185,11 +185,12 @@ export class UnitSystem {
     g.lineStyle(2, c, 0.9);
     switch (type) {
       case 'infantry':
-        // Sword/cross
-        g.beginPath(); g.moveTo(0, -7); g.lineTo(0, 7); g.strokePath();
-        g.beginPath(); g.moveTo(-5, -1); g.lineTo(5, -1); g.strokePath();
-        g.fillStyle(c, 0.8);
-        g.fillCircle(0, 8, 1.5);
+        // Crossed swords
+        g.beginPath(); g.moveTo(-6, -7); g.lineTo(6, 7); g.strokePath();
+        g.beginPath(); g.moveTo(6, -7); g.lineTo(-6, 7); g.strokePath();
+        g.lineStyle(1.5, c, 0.7);
+        g.beginPath(); g.moveTo(-3, -1); g.lineTo(-6, 2); g.strokePath();
+        g.beginPath(); g.moveTo(3, -1); g.lineTo(6, 2); g.strokePath();
         break;
       case 'cavalry':
         // Charge chevrons
@@ -198,10 +199,17 @@ export class UnitSystem {
         break;
       case 'archer':
         // Bow arc
-        g.beginPath(); g.arc(-2, 0, 8, -1.2, 1.2, false); g.strokePath();
+        g.beginPath(); g.arc(-3, 0, 9, -1.3, 1.3, false); g.strokePath();
+        // Bowstring
+        g.lineStyle(1, c, 0.5);
+        g.beginPath();
+        g.moveTo(-3 + 9 * Math.cos(-1.3), 9 * Math.sin(-1.3));
+        g.lineTo(-3 + 9 * Math.cos(1.3), 9 * Math.sin(1.3));
+        g.strokePath();
         // Arrow
-        g.beginPath(); g.moveTo(-2, 0); g.lineTo(8, 0); g.strokePath();
-        g.beginPath(); g.moveTo(5, -2); g.lineTo(8, 0); g.lineTo(5, 2); g.strokePath();
+        g.lineStyle(2, c, 0.9);
+        g.beginPath(); g.moveTo(-3, 0); g.lineTo(9, 0); g.strokePath();
+        g.beginPath(); g.moveTo(6, -3); g.lineTo(9, 0); g.lineTo(6, 3); g.strokePath();
         break;
     }
   }

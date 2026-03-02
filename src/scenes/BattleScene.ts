@@ -9,6 +9,7 @@ import { AISystem } from '../systems/AISystem';
 import type { AIDifficulty } from '../systems/AISystem';
 import { HUD } from '../ui/HUD';
 import { loadSettings } from '../config/settings';
+import { AudioSystem } from '../systems/AudioSystem';
 import type { PeerManager } from '../multiplayer/PeerManager';
 import { GameSync } from '../multiplayer/GameSync';
 import type { MovePayload, AttackPayload, StateSyncPayload, GameOverPayload } from '../multiplayer/GameSync';
@@ -44,6 +45,7 @@ export class BattleScene extends Phaser.Scene {
   private enemyKills = 0;
   private enemyLost = 0;
   private killTracker = new Map<number, number>();
+  private lastCombatSoundTime = 0;
 
   // Multiplayer
   private isMultiplayer = false;
@@ -97,6 +99,22 @@ export class BattleScene extends Phaser.Scene {
 
     this.cameraSystem = new CameraSystem(this, this.mapSystem.mapWidthPx, this.mapSystem.mapHeightPx);
 
+    // Pan camera to player army on start
+    const playerUnits = this.unitSystem.getUnitsByFaction('player');
+    if (playerUnits.length > 0) {
+      let avgX = 0, avgY = 0;
+      for (const u of playerUnits) {
+        const pos = this.mapSystem.gridToWorld(u.col, u.row);
+        avgX += pos.x;
+        avgY += pos.y;
+      }
+      avgX /= playerUnits.length;
+      avgY /= playerUnits.length;
+      this.time.delayedCall(400, () => {
+        this.cameraSystem.panTo(avgX, avgY, 1000);
+      });
+    }
+
     // HUD
     this.hud = new HUD(this);
     this.hud.create(this.unitSystem, this.mapSystem);
@@ -110,6 +128,17 @@ export class BattleScene extends Phaser.Scene {
             const dName = event.defender.unitType.charAt(0).toUpperCase() + event.defender.unitType.slice(1);
             const side = event.attacker.faction === 'player' ? '⚔' : '☠';
             this.hud.addCombatLog(`${side} ${aName} → ${dName} for ${event.damage} dmg`);
+            // Sound effects (throttled)
+            if (Date.now() - this.lastCombatSoundTime > 200) {
+              this.lastCombatSoundTime = Date.now();
+              const combatDist = Math.abs(event.attacker.col - event.defender.col) +
+                Math.abs(event.attacker.row - event.defender.row);
+              if (combatDist > 1 && event.attacker.range > 1) {
+                AudioSystem.getInstance().playArrowLaunch();
+              } else {
+                AudioSystem.getInstance().playSwordClash();
+              }
+            }
           }
           break;
         case 'unit_death':
@@ -122,6 +151,7 @@ export class BattleScene extends Phaser.Scene {
               this.enemyLost++;
               this.hud.addCombatLog(`💀 Enemy ${name} destroyed!`);
             }
+            AudioSystem.getInstance().playUnitDeath();
             // Track kills for MVP via attacker
             const units = this.unitSystem.getUnits();
             for (const u of units) {

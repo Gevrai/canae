@@ -7,6 +7,7 @@ import type { MovementSystem } from './MovementSystem';
 import type { CombatSystem } from './CombatSystem';
 import type { GameSync } from '../multiplayer/GameSync';
 import { TILE_SIZE } from '../config/game.config';
+import { AudioSystem } from './AudioSystem';
 
 export class SelectionSystem {
   private scene: Phaser.Scene;
@@ -23,6 +24,9 @@ export class SelectionSystem {
   private hoveredTile: { col: number; row: number } | null = null;
   private controlledFaction: Faction;
   private gameSync: GameSync | null;
+  private lastClickTime = 0;
+  private lastClickCol = -1;
+  private lastClickRow = -1;
 
   constructor(
     scene: Phaser.Scene,
@@ -59,6 +63,7 @@ export class SelectionSystem {
     }
     this.selectedUnit = unit;
     this.unitSystem.setSelected(unit, true);
+    AudioSystem.getInstance().playSelect();
 
     if (!unit.moved && !unit.isMoving) {
       this.reachableTiles = this.movementSystem.getReachableTiles(
@@ -110,7 +115,7 @@ export class SelectionSystem {
         this.pointerDownPos.x, this.pointerDownPos.y,
         pointer.x, pointer.y,
       );
-      if (dist < 10) {
+      if (dist < 5) {
         this.handleClick(pointer);
       }
       this.pointerDownPos = null;
@@ -127,12 +132,27 @@ export class SelectionSystem {
     const wp = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
     const grid = this.map.worldToGrid(wp.x, wp.y);
 
+    // Double-tap detection
+    const now = Date.now();
+    const isDoubleTap = (now - this.lastClickTime < 350) &&
+      grid.col === this.lastClickCol && grid.row === this.lastClickRow;
+    this.lastClickTime = now;
+    this.lastClickCol = grid.col;
+    this.lastClickRow = grid.row;
+
     if (!this.map.isInBounds(grid.col, grid.row)) {
       this.deselect();
       return;
     }
 
     const clickedUnit = this.unitSystem.getUnitAt(grid.col, grid.row);
+
+    // Double-tap on unit: center camera on it
+    if (isDoubleTap && clickedUnit) {
+      const pos = this.map.gridToWorld(clickedUnit.col, clickedUnit.row);
+      this.scene.cameras.main.pan(pos.x, pos.y, 400, 'Power2');
+      return;
+    }
 
     if (this.selectedUnit) {
       if (this.selectedUnit.isRouting) {

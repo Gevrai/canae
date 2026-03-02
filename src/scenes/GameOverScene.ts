@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { PARCHMENT_BG } from '../config/game.config';
+import { AudioSystem } from '../systems/AudioSystem';
 
 interface BattleStats {
   result: 'victory' | 'defeat';
@@ -75,6 +76,13 @@ export class GameOverScene extends Phaser.Scene {
       fontStyle: 'italic',
     }).setOrigin(0.5);
 
+    // Play result sound
+    if (isVictory) {
+      AudioSystem.getInstance().playVictory();
+    } else {
+      AudioSystem.getInstance().playDefeat();
+    }
+
     // Stats panel
     const secs = Math.floor(this.stats.duration / 1000);
     const m = Math.floor(secs / 60);
@@ -126,18 +134,19 @@ export class GameOverScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     const container = this.add.container(x, y, [bg, txt]);
-    const hitZone = this.add.zone(x, y, bw, bh).setInteractive({ useHandCursor: true });
+    container.setSize(bw, bh);
+    container.setInteractive({ useHandCursor: true });
 
-    hitZone.on('pointerover', () => {
+    container.on('pointerover', () => {
       this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, true);
       txt.setColor('#2a1a0a');
     });
-    hitZone.on('pointerout', () => {
+    container.on('pointerout', () => {
       this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, false);
       txt.setColor('#4a3520');
     });
-    hitZone.on('pointerdown', () => { container.setScale(0.96); });
-    hitZone.on('pointerup', () => {
+    container.on('pointerdown', () => { container.setScale(0.96); });
+    container.on('pointerup', () => {
       container.setScale(1);
       callback();
     });
