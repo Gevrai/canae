@@ -3,6 +3,10 @@ import type { TerrainDef } from '../config/terrain.config';
 
 let nextUnitId = 1;
 
+export function resetUnitIds(): void {
+  nextUnitId = 1;
+}
+
 export class Unit {
   public readonly id: number;
   public readonly unitType: string;

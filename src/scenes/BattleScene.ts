@@ -13,6 +13,7 @@ import { AudioSystem } from '../systems/AudioSystem';
 import type { PeerManager } from '../multiplayer/PeerManager';
 import { GameSync } from '../multiplayer/GameSync';
 import type { MovePayload, AttackPayload, StateSyncPayload, GameOverPayload } from '../multiplayer/GameSync';
+import { resetUnitIds } from '../entities/Unit';
 
 type BattlePhase = 'deployment' | 'battle' | 'ended';
 
@@ -68,6 +69,7 @@ export class BattleScene extends Phaser.Scene {
   }
 
   create(): void {
+    resetUnitIds();
     this.phase = 'deployment';
     this.phaseTimer = 0;
     this.victoryCheckTimer = 0;
@@ -248,12 +250,6 @@ export class BattleScene extends Phaser.Scene {
   }
 
   private endBattle(result: 'victory' | 'defeat'): void {
-    // In multiplayer as guest, flip the result (guest controls enemy faction)
-    let displayResult = result;
-    if (this.isMultiplayer && !this.isHost) {
-      displayResult = result === 'victory' ? 'defeat' : 'victory';
-    }
-
     // Find MVP
     let mvpName = 'None';
     let mvpKills = 0;
@@ -281,7 +277,7 @@ export class BattleScene extends Phaser.Scene {
 
     this.hud.destroy();
     this.scene.start('GameOverScene', {
-      result: displayResult,
+      result,
       playerKills: this.playerKills,
       playerLost: this.playerLost,
       enemyKills: this.enemyKills,
