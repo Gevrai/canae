@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
 import type { Unit } from '../entities/Unit';
+import type { Faction } from '../config/units.config';
 import type { MapSystem } from './MapSystem';
 import type { UnitSystem } from './UnitSystem';
 import type { MovementSystem } from './MovementSystem';
 import type { CombatSystem } from './CombatSystem';
+import type { GameSync } from '../multiplayer/GameSync';
 import { TILE_SIZE } from '../config/game.config';
 
 export class SelectionSystem {
@@ -19,6 +21,8 @@ export class SelectionSystem {
   private pathGraphics: Phaser.GameObjects.Graphics;
   private pointerDownPos: { x: number; y: number } | null = null;
   private hoveredTile: { col: number; row: number } | null = null;
+  private controlledFaction: Faction;
+  private gameSync: GameSync | null;
 
   constructor(
     scene: Phaser.Scene,
@@ -26,12 +30,16 @@ export class SelectionSystem {
     unitSystem: UnitSystem,
     movementSystem: MovementSystem,
     combatSystem: CombatSystem,
+    controlledFaction: Faction = 'player',
+    gameSync: GameSync | null = null,
   ) {
     this.scene = scene;
     this.map = map;
     this.unitSystem = unitSystem;
     this.movementSystem = movementSystem;
     this.combatSystem = combatSystem;
+    this.controlledFaction = controlledFaction;
+    this.gameSync = gameSync;
 
     this.overlayGraphics = scene.add.graphics();
     this.overlayGraphics.setDepth(5);
@@ -133,7 +141,7 @@ export class SelectionSystem {
       }
 
       if (clickedUnit) {
-        if (clickedUnit.faction === 'player') {
+        if (clickedUnit.faction === this.controlledFaction) {
           if (clickedUnit === this.selectedUnit) {
             this.deselect();
           } else {
@@ -153,7 +161,7 @@ export class SelectionSystem {
         }
       }
     } else {
-      if (clickedUnit && clickedUnit.faction === 'player' && !clickedUnit.isMoving && !clickedUnit.isRouting) {
+      if (clickedUnit && clickedUnit.faction === this.controlledFaction && !clickedUnit.isMoving && !clickedUnit.isRouting) {
         this.select(clickedUnit);
       }
     }
@@ -166,6 +174,9 @@ export class SelectionSystem {
 
     if (dist <= 1) {
       // Adjacent — melee attack
+      if (this.gameSync) {
+        this.gameSync.sendAttackCommand(unit.id, enemy.id);
+      }
       this.combatSystem.attack(unit, enemy);
       this.deselect();
     } else if (
@@ -173,6 +184,9 @@ export class SelectionSystem {
       this.combatSystem.hasLineOfSight(unit.col, unit.row, enemy.col, enemy.row)
     ) {
       // In ranged range with LoS
+      if (this.gameSync) {
+        this.gameSync.sendAttackCommand(unit.id, enemy.id);
+      }
       this.combatSystem.attack(unit, enemy);
       this.deselect();
     } else if (!unit.moved && !unit.isMoving) {
@@ -283,6 +297,12 @@ export class SelectionSystem {
       this.unitSystem.getUnits(),
     );
     if (path.length < 2) return;
+
+    // Send move command in multiplayer
+    if (this.gameSync) {
+      this.gameSync.sendMoveCommand(unit.id, destCol, destRow);
+    }
+
     this.deselect();
     this.movementSystem.moveUnit(unit, path, this.unitSystem);
   }

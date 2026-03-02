@@ -3,17 +3,24 @@ import { PARCHMENT_BG } from '../config/game.config';
 import { loadSettings, saveSettings } from '../config/settings';
 import type { GameSettings } from '../config/settings';
 import type { AIDifficulty } from '../systems/AISystem';
+import { PeerManager } from '../multiplayer/PeerManager';
+import { GameSync } from '../multiplayer/GameSync';
 
 export class MenuScene extends Phaser.Scene {
   private settings!: GameSettings;
   private settingsOverlay: Phaser.GameObjects.Container | null = null;
-  private toast: Phaser.GameObjects.Text | null = null;
+  private lobbyOverlay: Phaser.GameObjects.Container | null = null;
+  private peerManager: PeerManager | null = null;
 
   constructor() {
     super({ key: 'MenuScene' });
   }
 
   create(): void {
+    // Clean up any previous peer connection
+    this.peerManager?.disconnect();
+    this.peerManager = null;
+
     this.settings = loadSettings();
     const { width, height } = this.scale;
 
@@ -62,7 +69,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     this.createButton(width / 2, height * 0.62, 'Multiplayer', () => {
-      this.showToast('Coming Soon');
+      this.showLobby();
     });
 
     this.createButton(width / 2, height * 0.74, 'Settings', () => {
@@ -70,7 +77,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Version
-    this.add.text(width - 10, height - 10, 'v0.6', {
+    this.add.text(width - 10, height - 10, 'v0.7', {
       fontSize: '12px',
       color: '#b0a080',
       fontFamily: 'Georgia, serif',
@@ -195,34 +202,313 @@ export class MenuScene extends Phaser.Scene {
     g.fillRoundedRect(x + 2, y + 2, w - 4, h / 3, { tl: 5, tr: 5, bl: 0, br: 0 });
   }
 
-  private showToast(message: string): void {
-    if (this.toast) this.toast.destroy();
+  // --- Multiplayer Lobby ---
+  private showLobby(): void {
+    if (this.lobbyOverlay) {
+      this.closeLobby();
+      return;
+    }
     const { width, height } = this.scale;
-    this.toast = this.add.text(width / 2, height * 0.88, message, {
-      fontSize: '18px',
-      color: '#ffffff',
-      backgroundColor: '#5a3a1a',
-      padding: { x: 20, y: 10 },
-      fontFamily: 'Georgia, serif',
-    }).setOrigin(0.5).setAlpha(0);
+    const pw = 380;
+    const ph = 320;
+    const px = (width - pw) / 2;
+    const py = (height - ph) / 2;
 
-    this.tweens.add({
-      targets: this.toast,
-      alpha: 1,
-      duration: 200,
-      onComplete: () => {
-        this.tweens.add({
-          targets: this.toast,
-          alpha: 0,
-          delay: 1500,
-          duration: 300,
-          onComplete: () => {
-            this.toast?.destroy();
-            this.toast = null;
-          },
-        });
-      },
+    const overlay = this.add.container(0, 0);
+
+    // Dim background
+    const dim = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.4).setInteractive();
+    dim.on('pointerdown', () => { this.closeLobby(); });
+    overlay.add(dim);
+
+    // Panel
+    const panel = this.add.graphics();
+    panel.fillStyle(0xddd0b8, 1);
+    panel.fillRoundedRect(px, py, pw, ph, 8);
+    panel.lineStyle(2, 0x8b7355, 0.8);
+    panel.strokeRoundedRect(px, py, pw, ph, 8);
+    overlay.add(panel);
+
+    // Title
+    overlay.add(this.add.text(width / 2, py + 30, 'Multiplayer', {
+      fontSize: '26px',
+      color: '#4a3520',
+      fontFamily: 'Georgia, serif',
+      fontStyle: 'bold',
+    }).setOrigin(0.5));
+
+    // Create Game button
+    this.addLobbyButton(overlay, width / 2, py + 90, 'Create Game', () => {
+      this.closeLobby();
+      this.showCreateGame();
     });
+
+    // Join Game button
+    this.addLobbyButton(overlay, width / 2, py + 150, 'Join Game', () => {
+      this.closeLobby();
+      this.showJoinGame();
+    });
+
+    // Back button
+    this.addLobbyButton(overlay, width / 2, py + 240, 'Back', () => {
+      this.closeLobby();
+    });
+
+    // Close button
+    const closeBtn = this.add.text(px + pw - 12, py + 8, '✕', {
+      fontSize: '22px',
+      color: '#8b7355',
+      fontFamily: 'sans-serif',
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerdown', () => { this.closeLobby(); });
+    overlay.add(closeBtn);
+
+    this.lobbyOverlay = overlay;
+  }
+
+  private closeLobby(): void {
+    this.lobbyOverlay?.destroy();
+    this.lobbyOverlay = null;
+  }
+
+  private addLobbyButton(container: Phaser.GameObjects.Container, x: number, y: number, label: string, callback: () => void): void {
+    const bw = 220;
+    const bh = 44;
+
+    const bg = this.add.graphics();
+    this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, false);
+
+    const txt = this.add.text(0, 0, label, {
+      fontSize: '20px',
+      color: '#4a3520',
+      fontFamily: 'Georgia, serif',
+    }).setOrigin(0.5);
+
+    const btnContainer = this.add.container(x, y, [bg, txt]);
+    container.add(btnContainer);
+
+    const hitZone = this.add.zone(x, y, bw, bh).setInteractive({ useHandCursor: true });
+    hitZone.on('pointerover', () => { this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, true); txt.setColor('#2a1a0a'); });
+    hitZone.on('pointerout', () => { this.drawButtonBg(bg, -bw / 2, -bh / 2, bw, bh, false); txt.setColor('#4a3520'); });
+    hitZone.on('pointerdown', () => { btnContainer.setScale(0.96); });
+    hitZone.on('pointerup', () => { btnContainer.setScale(1); callback(); });
+    container.add(hitZone);
+  }
+
+  private showCreateGame(): void {
+    const { width, height } = this.scale;
+    const pw = 380;
+    const ph = 280;
+    const px = (width - pw) / 2;
+    const py = (height - ph) / 2;
+
+    const overlay = this.add.container(0, 0);
+
+    const dim = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.4).setInteractive();
+    overlay.add(dim);
+
+    const panel = this.add.graphics();
+    panel.fillStyle(0xddd0b8, 1);
+    panel.fillRoundedRect(px, py, pw, ph, 8);
+    panel.lineStyle(2, 0x8b7355, 0.8);
+    panel.strokeRoundedRect(px, py, pw, ph, 8);
+    overlay.add(panel);
+
+    overlay.add(this.add.text(width / 2, py + 30, 'Create Game', {
+      fontSize: '24px',
+      color: '#4a3520',
+      fontFamily: 'Georgia, serif',
+      fontStyle: 'bold',
+    }).setOrigin(0.5));
+
+    const statusText = this.add.text(width / 2, py + 70, 'Creating lobby...', {
+      fontSize: '16px',
+      color: '#5a3a1a',
+      fontFamily: 'Georgia, serif',
+    }).setOrigin(0.5);
+    overlay.add(statusText);
+
+    const codeText = this.add.text(width / 2, py + 110, '', {
+      fontSize: '36px',
+      color: '#8B2500',
+      fontFamily: 'Georgia, serif',
+      fontStyle: 'bold',
+      letterSpacing: 8,
+    }).setOrigin(0.5);
+    overlay.add(codeText);
+
+    // Copy button (hidden initially)
+    const copyBtn = this.add.text(width / 2, py + 155, '📋 Copy Code', {
+      fontSize: '14px',
+      color: '#5a3a1a',
+      backgroundColor: '#c8b898',
+      padding: { x: 12, y: 6 },
+      fontFamily: 'Georgia, serif',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true }).setVisible(false);
+    overlay.add(copyBtn);
+
+    const waitText = this.add.text(width / 2, py + 195, '', {
+      fontSize: '16px',
+      color: '#8b7355',
+      fontFamily: 'Georgia, serif',
+      fontStyle: 'italic',
+    }).setOrigin(0.5);
+    overlay.add(waitText);
+
+    // Cancel button
+    this.addLobbyButton(overlay, width / 2, py + 240, 'Cancel', () => {
+      this.peerManager?.disconnect();
+      this.peerManager = null;
+      overlay.destroy();
+    });
+
+    this.lobbyOverlay = overlay;
+
+    // Create peer lobby
+    this.peerManager = new PeerManager();
+    this.peerManager.createLobby().then((code) => {
+      statusText.setText('Room Code:');
+      codeText.setText(code);
+      copyBtn.setVisible(true);
+      waitText.setText('Waiting for opponent...');
+
+      copyBtn.on('pointerdown', () => {
+        navigator.clipboard.writeText(code).then(() => {
+          copyBtn.setText('✓ Copied!');
+          this.time.delayedCall(1500, () => { copyBtn.setText('📋 Copy Code'); });
+        }).catch(() => {
+          // Fallback: just show the code is already visible
+          copyBtn.setText('Code shown above');
+          this.time.delayedCall(1500, () => { copyBtn.setText('📋 Copy Code'); });
+        });
+      });
+
+      this.peerManager!.onConnect(() => {
+        waitText.setText('Connected! Starting battle...');
+        waitText.setColor('#2a6a2a');
+
+        const gameSync = new GameSync(this.peerManager!);
+
+        this.time.delayedCall(1000, () => {
+          overlay.destroy();
+          this.lobbyOverlay = null;
+          this.scene.start('BattleScene', {
+            multiplayer: true,
+            isHost: true,
+            peerManager: this.peerManager,
+            gameSync,
+          });
+        });
+      });
+    }).catch((err) => {
+      statusText.setText('Failed to create lobby');
+      statusText.setColor('#8B2500');
+      waitText.setText(String(err.message || err));
+    });
+  }
+
+  private showJoinGame(): void {
+    const { width, height } = this.scale;
+    const pw = 380;
+    const ph = 280;
+    const px = (width - pw) / 2;
+    const py = (height - ph) / 2;
+
+    const overlay = this.add.container(0, 0);
+
+    const dim = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.4).setInteractive();
+    overlay.add(dim);
+
+    const panel = this.add.graphics();
+    panel.fillStyle(0xddd0b8, 1);
+    panel.fillRoundedRect(px, py, pw, ph, 8);
+    panel.lineStyle(2, 0x8b7355, 0.8);
+    panel.strokeRoundedRect(px, py, pw, ph, 8);
+    overlay.add(panel);
+
+    overlay.add(this.add.text(width / 2, py + 30, 'Join Game', {
+      fontSize: '24px',
+      color: '#4a3520',
+      fontFamily: 'Georgia, serif',
+      fontStyle: 'bold',
+    }).setOrigin(0.5));
+
+    overlay.add(this.add.text(width / 2, py + 70, 'Enter Room Code:', {
+      fontSize: '16px',
+      color: '#5a3a1a',
+      fontFamily: 'Georgia, serif',
+    }).setOrigin(0.5));
+
+    // Create HTML input for room code
+    const inputEl = document.createElement('input');
+    inputEl.type = 'text';
+    inputEl.maxLength = 5;
+    inputEl.placeholder = 'XXXXX';
+    inputEl.style.cssText = `
+      font-size: 24px; font-family: Georgia, serif; font-weight: bold;
+      text-align: center; letter-spacing: 6px; text-transform: uppercase;
+      width: 180px; padding: 8px; border: 2px solid #8b7355;
+      background: #f0e8d8; color: #4a3520; border-radius: 6px; outline: none;
+    `;
+    const inputDom = this.add.dom(width / 2, py + 110, inputEl);
+    overlay.add(inputDom);
+
+    const statusText = this.add.text(width / 2, py + 160, '', {
+      fontSize: '14px',
+      color: '#8b7355',
+      fontFamily: 'Georgia, serif',
+      fontStyle: 'italic',
+    }).setOrigin(0.5);
+    overlay.add(statusText);
+
+    // Connect button
+    this.addLobbyButton(overlay, width / 2, py + 195, 'Connect', () => {
+      const code = inputEl.value.toUpperCase().trim();
+      if (code.length < 4) {
+        statusText.setText('Please enter a valid room code');
+        statusText.setColor('#8B2500');
+        return;
+      }
+
+      statusText.setText('Connecting...');
+      statusText.setColor('#8b7355');
+
+      this.peerManager = new PeerManager();
+      this.peerManager.joinLobby(code).then(() => {
+        statusText.setText('Connected! Starting battle...');
+        statusText.setColor('#2a6a2a');
+
+        const gameSync = new GameSync(this.peerManager!);
+
+        this.time.delayedCall(1000, () => {
+          overlay.destroy();
+          this.lobbyOverlay = null;
+          this.scene.start('BattleScene', {
+            multiplayer: true,
+            isHost: false,
+            peerManager: this.peerManager,
+            gameSync,
+          });
+        });
+      }).catch((err) => {
+        statusText.setText(`Connection failed: ${err.message || err}`);
+        statusText.setColor('#8B2500');
+        this.peerManager?.disconnect();
+        this.peerManager = null;
+      });
+    });
+
+    // Cancel button
+    this.addLobbyButton(overlay, width / 2, py + 245, 'Cancel', () => {
+      this.peerManager?.disconnect();
+      this.peerManager = null;
+      overlay.destroy();
+    });
+
+    this.lobbyOverlay = overlay;
+
+    // Auto-focus input
+    this.time.delayedCall(100, () => { inputEl.focus(); });
   }
 
   private toggleSettings(): void {
