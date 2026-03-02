@@ -51,6 +51,11 @@ export class AISystem {
   private rng: () => number;
   private unitStaggerOffset = new Map<number, number>();
   private active = false;
+  private initialEnemyCount = 0;
+  private lastCombatTime = new Map<number, number>();
+  private elapsedTime = 0;
+  private desperate = false;
+  private criticallyDesperate = false;
 
   constructor(
     unitSystem: UnitSystem,
@@ -70,6 +75,11 @@ export class AISystem {
   start(): void {
     this.active = true;
     this.timer = 0;
+    this.elapsedTime = 0;
+    this.initialEnemyCount = 0;
+    this.lastCombatTime.clear();
+    this.desperate = false;
+    this.criticallyDesperate = false;
   }
 
   stop(): void {
@@ -79,6 +89,7 @@ export class AISystem {
   update(delta: number): void {
     if (!this.active) return;
 
+    this.elapsedTime += delta;
     this.timer += delta;
     if (this.timer < this.params.interval) return;
     this.timer -= this.params.interval;
@@ -90,6 +101,20 @@ export class AISystem {
     const enemies = this.unitSystem.getUnitsByFaction('enemy');
     const players = this.unitSystem.getUnitsByFaction('player');
     if (players.length === 0 || enemies.length === 0) return;
+
+    // Track initial army size for desperation calculation
+    if (this.initialEnemyCount === 0) {
+      this.initialEnemyCount = enemies.length;
+    }
+    this.desperate = enemies.length / this.initialEnemyCount < 0.5;
+    this.criticallyDesperate = enemies.length <= 3;
+
+    // Update last combat time for units currently engaged
+    for (const unit of enemies) {
+      if (unit.attackTargetId) {
+        this.lastCombatTime.set(unit.id, this.elapsedTime);
+      }
+    }
 
     const decisions: AIDecision[] = [];
 
@@ -137,9 +162,19 @@ export class AISystem {
   private makeDecision(unit: Unit, players: Unit[], allies: Unit[]): AIDecision | null {
     const hpRatio = unit.hp / unit.maxHp;
 
-    // Retreat if heavily damaged
-    if (hpRatio < 0.3) {
+    // Retreat if heavily damaged (fight to the death when critically desperate)
+    if (hpRatio < 0.3 && !this.criticallyDesperate) {
       return this.planRetreat(unit, players, allies);
+    }
+
+    // Idle units advance after 15s without combat
+    const lastCombat = this.lastCombatTime.get(unit.id) ?? 0;
+    if (this.elapsedTime - lastCombat >= 15000) {
+      const nearest = this.findNearestEnemy(unit, players);
+      if (nearest) {
+        this.lastCombatTime.set(unit.id, this.elapsedTime);
+        return this.planAttack(unit, nearest, 8);
+      }
     }
 
     // Check if a nearby ally is in combat and needs support
@@ -149,6 +184,11 @@ export class AISystem {
     const bestTarget = this.selectTarget(unit, players);
     if (!bestTarget) {
       if (supportTarget) return supportTarget;
+      // When desperate, advance toward nearest enemy instead of holding
+      if (this.desperate) {
+        const nearest = this.findNearestEnemy(unit, players);
+        if (nearest) return this.planAttack(unit, nearest, 5);
+      }
       return this.planHold(unit);
     }
 
@@ -166,8 +206,18 @@ export class AISystem {
         }
         return this.planAttack(unit, bestTarget, 10);
 
-      case 'archer':
-        return this.planArcherBehavior(unit, bestTarget, players, allies);
+      case 'archer': {
+        // In critical desperation, archers charge like infantry
+        if (this.criticallyDesperate) {
+          return this.planAttack(unit, bestTarget, 8);
+        }
+        const archerDecision = this.planArcherBehavior(unit, bestTarget, players, allies);
+        // Archers advance when no ranged position found and army is desperate
+        if (!archerDecision && this.desperate) {
+          return this.planAttack(unit, bestTarget, 6);
+        }
+        return archerDecision;
+      }
 
       default: // infantry
         return this.planAttack(unit, bestTarget, 5);
@@ -390,6 +440,20 @@ export class AISystem {
   }
 
   // --- Pathfinding helpers ---
+
+  private findNearestEnemy(unit: Unit, players: Unit[]): Unit | null {
+    let nearest: Unit | null = null;
+    let bestDist = Infinity;
+    for (const p of players) {
+      if (!p.isAlive()) continue;
+      const d = Math.abs(unit.col - p.col) + Math.abs(unit.row - p.row);
+      if (d < bestDist) {
+        bestDist = d;
+        nearest = p;
+      }
+    }
+    return nearest;
+  }
 
   private findApproachTile(unit: Unit, target: Unit): { col: number; row: number } | null {
     const reachable = this.movementSystem.getReachableTiles(
