@@ -6,31 +6,29 @@ import type { UnitSystem } from './UnitSystem';
 import type { MovementSystem } from './MovementSystem';
 import type { CombatSystem } from './CombatSystem';
 import type { GameSync } from '../multiplayer/GameSync';
-import { TILE_SIZE } from '../config/game.config';
 import { AudioSystem } from './AudioSystem';
+
+const MELEE_RANGE = 40;
+const CLICK_RADIUS_PAD = 10;
 
 export class SelectionSystem {
   private scene: Phaser.Scene;
-  private map: MapSystem;
   private unitSystem: UnitSystem;
   private movementSystem: MovementSystem;
   private combatSystem: CombatSystem;
   private selectedUnit: Unit | null = null;
-  private reachableTiles: { col: number; row: number }[] = [];
-  private attackRangeTiles: { col: number; row: number }[] = [];
   private overlayGraphics: Phaser.GameObjects.Graphics;
   private pathGraphics: Phaser.GameObjects.Graphics;
   private pointerDownPos: { x: number; y: number } | null = null;
-  private hoveredTile: { col: number; row: number } | null = null;
   private controlledFaction: Faction;
   private gameSync: GameSync | null;
   private lastClickTime = 0;
-  private lastClickCol = -1;
-  private lastClickRow = -1;
+  private lastClickX = -1;
+  private lastClickY = -1;
 
   constructor(
     scene: Phaser.Scene,
-    map: MapSystem,
+    _map: MapSystem,
     unitSystem: UnitSystem,
     movementSystem: MovementSystem,
     combatSystem: CombatSystem,
@@ -38,7 +36,6 @@ export class SelectionSystem {
     gameSync: GameSync | null = null,
   ) {
     this.scene = scene;
-    this.map = map;
     this.unitSystem = unitSystem;
     this.movementSystem = movementSystem;
     this.combatSystem = combatSystem;
@@ -65,30 +62,6 @@ export class SelectionSystem {
     this.unitSystem.setSelected(unit, true);
     AudioSystem.getInstance().playSelect();
 
-    if (!unit.moved && !unit.isMoving) {
-      this.reachableTiles = this.movementSystem.getReachableTiles(
-        unit.col, unit.row, unit.movement,
-        unit.faction, this.unitSystem.getUnits(),
-      );
-    } else {
-      this.reachableTiles = [];
-    }
-
-    // Attack range overlay for ranged units
-    this.attackRangeTiles = [];
-    if (unit.range > 1) {
-      for (let dr = -unit.range; dr <= unit.range; dr++) {
-        for (let dc = -unit.range; dc <= unit.range; dc++) {
-          if (Math.abs(dr) + Math.abs(dc) > unit.range || (dr === 0 && dc === 0)) continue;
-          const tc = unit.col + dc;
-          const tr = unit.row + dr;
-          if (!this.map.isInBounds(tc, tr)) continue;
-          if (this.reachableTiles.some(t => t.col === tc && t.row === tr)) continue;
-          this.attackRangeTiles.push({ col: tc, row: tr });
-        }
-      }
-    }
-
     this.drawOverlay();
   }
 
@@ -97,11 +70,8 @@ export class SelectionSystem {
       this.unitSystem.setSelected(this.selectedUnit, false);
     }
     this.selectedUnit = null;
-    this.reachableTiles = [];
-    this.attackRangeTiles = [];
     this.overlayGraphics.clear();
     this.pathGraphics.clear();
-    this.hoveredTile = null;
   }
 
   private setupInput(): void {
@@ -128,29 +98,39 @@ export class SelectionSystem {
     });
   }
 
+  /** Find the nearest alive unit within its collisionRadius + padding of a world point. */
+  private findUnitAtWorld(wx: number, wy: number): Unit | undefined {
+    let best: Unit | undefined;
+    let bestDist = Infinity;
+    for (const u of this.unitSystem.getUnits()) {
+      if (!u.isAlive()) continue;
+      const d = Phaser.Math.Distance.Between(wx, wy, u.x, u.y);
+      if (d < u.collisionRadius + CLICK_RADIUS_PAD && d < bestDist) {
+        bestDist = d;
+        best = u;
+      }
+    }
+    return best;
+  }
+
   private handleClick(pointer: Phaser.Input.Pointer): void {
     const wp = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    const grid = this.map.worldToGrid(wp.x, wp.y);
+    const worldX = wp.x;
+    const worldY = wp.y;
 
-    // Double-tap detection
+    // Double-tap detection (proximity-based, 20px tolerance)
     const now = Date.now();
     const isDoubleTap = (now - this.lastClickTime < 350) &&
-      grid.col === this.lastClickCol && grid.row === this.lastClickRow;
+      Phaser.Math.Distance.Between(worldX, worldY, this.lastClickX, this.lastClickY) < 20;
     this.lastClickTime = now;
-    this.lastClickCol = grid.col;
-    this.lastClickRow = grid.row;
+    this.lastClickX = worldX;
+    this.lastClickY = worldY;
 
-    if (!this.map.isInBounds(grid.col, grid.row)) {
-      this.deselect();
-      return;
-    }
-
-    const clickedUnit = this.unitSystem.getUnitAt(grid.col, grid.row);
+    const clickedUnit = this.findUnitAtWorld(worldX, worldY);
 
     // Double-tap on unit: center camera on it
     if (isDoubleTap && clickedUnit) {
-      const pos = this.map.gridToWorld(clickedUnit.col, clickedUnit.row);
-      this.scene.cameras.main.pan(pos.x, pos.y, 400, 'Power2');
+      this.scene.cameras.main.pan(clickedUnit.x, clickedUnit.y, 400, 'Power2');
       return;
     }
 
@@ -171,14 +151,8 @@ export class SelectionSystem {
           this.handleAttackClick(clickedUnit);
         }
       } else {
-        const isReachable = this.reachableTiles.some(
-          t => t.col === grid.col && t.row === grid.row,
-        );
-        if (isReachable) {
-          this.moveSelectedUnit(grid.col, grid.row);
-        } else {
-          this.deselect();
-        }
+        // Move to clicked world position
+        this.moveSelectedUnit(worldX, worldY);
       }
     } else {
       if (clickedUnit && clickedUnit.faction === this.controlledFaction && !clickedUnit.isMoving && !clickedUnit.isRouting) {
@@ -190,17 +164,17 @@ export class SelectionSystem {
   private handleAttackClick(enemy: Unit): void {
     if (!this.selectedUnit) return;
     const unit = this.selectedUnit;
-    const dist = Math.abs(unit.col - enemy.col) + Math.abs(unit.row - enemy.row);
+    const dist = Phaser.Math.Distance.Between(unit.x, unit.y, enemy.x, enemy.y);
 
-    if (dist <= 1) {
-      // Adjacent — melee attack
+    if (dist <= MELEE_RANGE) {
+      // In melee range — attack directly
       if (this.gameSync) {
         this.gameSync.sendAttackCommand(unit.id, enemy.id);
       }
       this.combatSystem.attack(unit, enemy);
       this.deselect();
     } else if (
-      unit.range > 1 && dist <= unit.range &&
+      unit.range > MELEE_RANGE && dist <= unit.range &&
       this.combatSystem.hasLineOfSight(unit.col, unit.row, enemy.col, enemy.row)
     ) {
       // In ranged range with LoS
@@ -209,162 +183,93 @@ export class SelectionSystem {
       }
       this.combatSystem.attack(unit, enemy);
       this.deselect();
-    } else if (!unit.moved && !unit.isMoving) {
-      // Out of range — move toward enemy
-      const dest = this.findAttackPosition(unit, enemy);
-      if (dest) {
-        unit.attackTargetId = enemy.id;
-        this.moveSelectedUnit(dest.col, dest.row);
-      } else {
-        this.deselect();
-      }
     } else {
-      this.deselect();
+      // Out of range — move toward enemy and queue attack
+      unit.attackTargetId = enemy.id;
+      // Move to a point near the enemy, offset by melee/ranged standoff distance
+      const standoff = unit.range > MELEE_RANGE ? unit.range * 0.8 : MELEE_RANGE * 0.8;
+      const angle = Math.atan2(unit.y - enemy.y, unit.x - enemy.x);
+      const targetX = enemy.x + Math.cos(angle) * standoff;
+      const targetY = enemy.y + Math.sin(angle) * standoff;
+      this.moveSelectedUnit(targetX, targetY);
     }
-  }
-
-  private findAttackPosition(unit: Unit, target: Unit): { col: number; row: number } | null {
-    let best: { col: number; row: number } | null = null;
-    let bestDist = Infinity;
-
-    if (unit.range > 1) {
-      // Ranged: find reachable tile within range of target
-      for (const tile of this.reachableTiles) {
-        const d = Math.abs(tile.col - target.col) + Math.abs(tile.row - target.row);
-        if (d > 0 && d <= unit.range) {
-          const md = Math.abs(tile.col - unit.col) + Math.abs(tile.row - unit.row);
-          if (md < bestDist) { bestDist = md; best = tile; }
-        }
-      }
-    } else {
-      // Melee: find reachable tile adjacent to target
-      const adjacents = [
-        { col: target.col - 1, row: target.row },
-        { col: target.col + 1, row: target.row },
-        { col: target.col, row: target.row - 1 },
-        { col: target.col, row: target.row + 1 },
-      ];
-      for (const adj of adjacents) {
-        if (this.reachableTiles.some(t => t.col === adj.col && t.row === adj.row)) {
-          const md = Math.abs(adj.col - unit.col) + Math.abs(adj.row - unit.row);
-          if (md < bestDist) { bestDist = md; best = adj; }
-        }
-      }
-    }
-
-    return best;
   }
 
   private handleHover(pointer: Phaser.Input.Pointer): void {
     if (!this.selectedUnit) return;
+    const unit = this.selectedUnit;
 
     const wp = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    const grid = this.map.worldToGrid(wp.x, wp.y);
-
-    if (this.hoveredTile && this.hoveredTile.col === grid.col && this.hoveredTile.row === grid.row) {
-      return;
-    }
-    this.hoveredTile = { col: grid.col, row: grid.row };
     this.pathGraphics.clear();
 
     // Attack indicator on enemy
-    const hoveredUnit = this.unitSystem.getUnitAt(grid.col, grid.row);
-    if (hoveredUnit && hoveredUnit.faction !== this.selectedUnit.faction) {
-      const dist = Math.abs(this.selectedUnit.col - grid.col) + Math.abs(this.selectedUnit.row - grid.row);
-      if (dist <= 1 || (this.selectedUnit.range > 1 && dist <= this.selectedUnit.range)) {
-        const half = TILE_SIZE / 2;
-        const pos = this.map.gridToWorld(grid.col, grid.row);
-        this.pathGraphics.lineStyle(2, 0xff3333, 0.8);
-        this.pathGraphics.strokeRect(pos.x - half, pos.y - half, TILE_SIZE, TILE_SIZE);
-        // Crossed swords indicator
+    const hoveredUnit = this.findUnitAtWorld(wp.x, wp.y);
+    if (hoveredUnit && hoveredUnit.faction !== unit.faction) {
+      const dist = Phaser.Math.Distance.Between(unit.x, unit.y, hoveredUnit.x, hoveredUnit.y);
+      if (dist <= MELEE_RANGE || (unit.range > MELEE_RANGE && dist <= unit.range)) {
+        // Crossed swords indicator at enemy position
         this.pathGraphics.lineStyle(2, 0xff3333, 0.8);
         this.pathGraphics.beginPath();
-        this.pathGraphics.moveTo(pos.x - 8, pos.y - 8);
-        this.pathGraphics.lineTo(pos.x + 8, pos.y + 8);
+        this.pathGraphics.moveTo(hoveredUnit.x - 8, hoveredUnit.y - 8);
+        this.pathGraphics.lineTo(hoveredUnit.x + 8, hoveredUnit.y + 8);
         this.pathGraphics.strokePath();
         this.pathGraphics.beginPath();
-        this.pathGraphics.moveTo(pos.x + 8, pos.y - 8);
-        this.pathGraphics.lineTo(pos.x - 8, pos.y + 8);
+        this.pathGraphics.moveTo(hoveredUnit.x + 8, hoveredUnit.y - 8);
+        this.pathGraphics.lineTo(hoveredUnit.x - 8, hoveredUnit.y + 8);
         this.pathGraphics.strokePath();
         return;
       }
     }
 
-    // Movement path preview
-    const isReachable = this.reachableTiles.some(
-      t => t.col === grid.col && t.row === grid.row,
-    );
-    if (isReachable) {
-      const path = this.movementSystem.findPath(
-        this.selectedUnit.col, this.selectedUnit.row,
-        grid.col, grid.row,
-        this.selectedUnit.faction,
-        this.unitSystem.getUnits(),
-      );
-      if (path.length > 1) {
-        this.drawPath(path);
-      }
-    }
+    // Movement line preview (dotted line from unit to hover position)
+    this.drawMovementLine(unit.x, unit.y, wp.x, wp.y);
   }
 
-  private moveSelectedUnit(destCol: number, destRow: number): void {
+  private moveSelectedUnit(worldX: number, worldY: number): void {
     if (!this.selectedUnit) return;
     const unit = this.selectedUnit;
-    const path = this.movementSystem.findPath(
-      unit.col, unit.row,
-      destCol, destRow,
-      unit.faction,
-      this.unitSystem.getUnits(),
-    );
-    if (path.length < 2) return;
 
-    // Send move command in multiplayer
+    // Send move command in multiplayer (col/row params carry world coords for now)
     if (this.gameSync) {
-      this.gameSync.sendMoveCommand(unit.id, destCol, destRow);
+      this.gameSync.sendMoveCommand(unit.id, worldX, worldY);
     }
 
+    this.movementSystem.setTarget(unit, worldX, worldY);
     this.deselect();
-    this.movementSystem.moveUnit(unit, path, this.unitSystem);
   }
 
   private drawOverlay(): void {
     this.overlayGraphics.clear();
-    const half = TILE_SIZE / 2;
+    if (!this.selectedUnit) return;
+    const unit = this.selectedUnit;
 
-    // Movement range (blue)
-    for (const tile of this.reachableTiles) {
-      const pos = this.map.gridToWorld(tile.col, tile.row);
-      this.overlayGraphics.fillStyle(0x4488ff, 0.25);
-      this.overlayGraphics.fillRect(pos.x - half, pos.y - half, TILE_SIZE, TILE_SIZE);
-      this.overlayGraphics.lineStyle(1, 0x4488ff, 0.4);
-      this.overlayGraphics.strokeRect(pos.x - half, pos.y - half, TILE_SIZE, TILE_SIZE);
-    }
-
-    // Attack range for archers (red-orange)
-    for (const tile of this.attackRangeTiles) {
-      const pos = this.map.gridToWorld(tile.col, tile.row);
-      this.overlayGraphics.fillStyle(0xff6644, 0.15);
-      this.overlayGraphics.fillRect(pos.x - half, pos.y - half, TILE_SIZE, TILE_SIZE);
+    // Range circle for ranged units
+    if (unit.range > MELEE_RANGE) {
       this.overlayGraphics.lineStyle(1, 0xff6644, 0.3);
-      this.overlayGraphics.strokeRect(pos.x - half, pos.y - half, TILE_SIZE, TILE_SIZE);
+      this.overlayGraphics.strokeCircle(unit.x, unit.y, unit.range);
     }
   }
 
-  private drawPath(path: { col: number; row: number }[]): void {
-    this.pathGraphics.clear();
-    if (path.length < 2) return;
+  /** Draw a dotted line between two world points. */
+  private drawMovementLine(fromX: number, fromY: number, toX: number, toY: number): void {
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1) return;
+
+    const dashLen = 6;
+    const gapLen = 4;
+    const segLen = dashLen + gapLen;
+    const segments = Math.floor(len / segLen);
+
     this.pathGraphics.lineStyle(2, 0xffd700, 0.7);
-    for (let i = 0; i < path.length - 1; i++) {
-      const from = this.map.gridToWorld(path[i].col, path[i].row);
-      const to = this.map.gridToWorld(path[i + 1].col, path[i + 1].row);
-      for (let s = 0; s < 6; s += 2) {
-        const t1 = s / 6;
-        const t2 = (s + 1) / 6;
-        this.pathGraphics.beginPath();
-        this.pathGraphics.moveTo(from.x + (to.x - from.x) * t1, from.y + (to.y - from.y) * t1);
-        this.pathGraphics.lineTo(from.x + (to.x - from.x) * t2, from.y + (to.y - from.y) * t2);
-        this.pathGraphics.strokePath();
-      }
+    for (let i = 0; i < segments; i++) {
+      const t1 = (i * segLen) / len;
+      const t2 = (i * segLen + dashLen) / len;
+      this.pathGraphics.beginPath();
+      this.pathGraphics.moveTo(fromX + dx * t1, fromY + dy * t1);
+      this.pathGraphics.lineTo(fromX + dx * t2, fromY + dy * t2);
+      this.pathGraphics.strokePath();
     }
   }
 }

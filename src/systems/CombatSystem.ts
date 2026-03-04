@@ -13,6 +13,30 @@ export interface CombatEvent {
   unit?: Unit;
 }
 
+/** Euclidean distance between two units (pixels). */
+function unitDist(a: Unit, b: Unit): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// --- Distance / range constants (px) ---
+const MELEE_RANGE = 40;
+const AUTO_ENGAGE_RANGE = 96;
+const NEARBY_RADIUS = 128;
+const DEATH_MORALE_RADIUS = 192;
+const ARCHER_ISOLATION_RADIUS = 192;
+const CHARGE_DISTANCE_THRESHOLD = 128;
+const CHARGE_STAMINA_COST = 15;
+const CHARGE_MIN_STAMINA = 20;
+const CHARGE_COOLDOWN_MS = 4000;
+const CHARGE_DAMAGE_MULT = 1.5;
+const CHARGE_KNOCKBACK_PX = 16;
+const CHARGE_MORALE_PENALTY = 8;
+const BRACE_DEF_MULT = 1.35;
+const BRACE_VS_CAV_MULT = 1.25;
+const BRACE_CHARGE_REDUCTION = 0.5;
+
 export class CombatSystem {
   private scene: Phaser.Scene;
   private map: MapSystem;
@@ -53,8 +77,8 @@ export class CombatSystem {
     attacker.attackTargetId = defender.id;
 
     // Melee: defender auto-retaliates
-    const dist = Math.abs(attacker.col - defender.col) + Math.abs(attacker.row - defender.row);
-    if (dist <= 1 && !defender.attackTargetId) {
+    const dist = unitDist(attacker, defender);
+    if (dist <= MELEE_RANGE && !defender.attackTargetId) {
       defender.attackTargetId = attacker.id;
     }
 
@@ -78,6 +102,7 @@ export class CombatSystem {
     }
 
     this.updateMoraleRecovery(delta);
+    this.updateArcherIsolationMorale(delta);
     this.updateCombatIcons();
   }
 
@@ -90,15 +115,17 @@ export class CombatSystem {
 
       for (const other of units) {
         if (!other.isAlive() || other.faction === unit.faction) continue;
-        const dist = Math.abs(unit.col - other.col) + Math.abs(unit.row - other.row);
+        const dist = unitDist(unit, other);
 
-        if (unit.range <= 1 && dist <= 1) {
+        // Melee units auto-engage within AUTO_ENGAGE_RANGE
+        if (unit.range <= MELEE_RANGE && dist <= AUTO_ENGAGE_RANGE) {
           unit.attackTargetId = other.id;
           this.emit({ type: 'combat_start', attacker: unit, defender: other });
           break;
         }
 
-        if (unit.range > 1 && dist <= unit.range) {
+        // Ranged units auto-engage within their range
+        if (unit.range > MELEE_RANGE && dist <= unit.range) {
           if (this.hasLineOfSight(unit.col, unit.row, other.col, other.row)) {
             unit.attackTargetId = other.id;
             this.emit({ type: 'combat_start', attacker: unit, defender: other });
@@ -125,7 +152,7 @@ export class CombatSystem {
         continue;
       }
 
-      const dist = Math.abs(unit.col - target.col) + Math.abs(unit.row - target.row);
+      const dist = unitDist(unit, target);
 
       // Range check
       if (dist > unit.range) {
@@ -134,7 +161,7 @@ export class CombatSystem {
       }
 
       // LoS check for ranged
-      if (unit.range > 1 && dist > 1) {
+      if (unit.range > MELEE_RANGE && dist > MELEE_RANGE) {
         if (!this.hasLineOfSight(unit.col, unit.row, target.col, target.row)) {
           unit.attackTargetId = null;
           continue;
@@ -145,15 +172,14 @@ export class CombatSystem {
       target.takeDamage(damage);
       this.unitSystem.updateHealthBar(target);
 
+      // Stamina drain for combat
+      unit.stamina = Math.max(0, unit.stamina - unit.staminaDrainFight);
+
       this.showDamageNumber(target, damage);
       this.showHitFlash(target);
 
-      if (dist > 1) {
+      if (dist > MELEE_RANGE) {
         this.showProjectile(unit, target);
-      }
-
-      if (unit.hasChargeBonus) {
-        unit.hasChargeBonus = false;
       }
 
       this.applyMoraleDamage(target, damage);
@@ -166,56 +192,139 @@ export class CombatSystem {
   }
 
   private calculateDamage(attacker: Unit, defender: Unit): number {
+    const attackerTerrain = this.map.getTerrain(attacker.col, attacker.row);
     const defenderTerrain = this.map.getTerrain(defender.col, defender.row);
-    const terrainDefMod = 1 + (defenderTerrain?.defenseBonus ?? 0);
 
-    let baseDamage = attacker.attack - (defender.defense * terrainDefMod);
+    // Effective stats include stamina modifier
+    const aStats = attacker.getEffectiveStats(attackerTerrain);
+    const dStats = defender.getEffectiveStats(defenderTerrain);
 
-    const randomFactor = 0.8 + Math.random() * 0.4;
-    const flankBonus = this.getFlankBonus(attacker, defender);
-    const chargeBonus = attacker.hasChargeBonus ? 0.4 : 0;
-    const braceBonus = this.getBraceBonus(defender, attacker);
-    const heightBonus = this.getHeightBonus(attacker, defender);
-
-    const dist = Math.abs(attacker.col - defender.col) + Math.abs(attacker.row - defender.row);
-    const rangePenalty = (attacker.unitType === 'archer' && dist <= 1) ? -0.4 : 0;
-
-    // Forest reduces ranged damage
-    if (attacker.range > 1 && dist > 1 && defenderTerrain?.key === 'forest') {
-      baseDamage *= 0.7;
+    // --- Charge ---
+    let chargeMult = 1.0;
+    let chargeTriggered = false;
+    if (
+      attacker.isCharging &&
+      attacker.chargeDistanceAccum >= CHARGE_DISTANCE_THRESHOLD &&
+      attacker.stamina >= CHARGE_MIN_STAMINA &&
+      attacker.chargeCooldown <= 0
+    ) {
+      chargeMult = CHARGE_DAMAGE_MULT;
+      chargeTriggered = true;
     }
 
-    const moraleAttackMod = attacker.morale < 50 ? -0.2 : 0;
-    const totalMod = 1 + flankBonus + chargeBonus - braceBonus + heightBonus + rangePenalty + moraleAttackMod;
+    // --- Flank ---
+    const flankMult = this.getFlankMultiplier(attacker, defender);
 
-    return Math.round(Math.max(1, baseDamage * randomFactor * totalMod));
+    // --- Brace ---
+    let braceMult = 1.0;
+    let braceNegatesKnockback = false;
+    if (defender.isBraced) {
+      braceMult = BRACE_DEF_MULT;
+      if (attacker.unitType === 'cavalry') {
+        braceMult *= BRACE_VS_CAV_MULT; // 1.35 * 1.25 = 1.69
+      }
+      if (chargeTriggered) {
+        chargeMult = Math.max(1.0, chargeMult - BRACE_CHARGE_REDUCTION); // 1.5 → 1.0
+        braceNegatesKnockback = true;
+      }
+    }
+
+    // --- Archer proximity defense ---
+    const archerDefMod = this.getArcherProximityDefense(defender);
+
+    // --- Height ---
+    const heightMult = this.getHeightBonus(attacker, defender);
+
+    // --- Archer in melee penalty ---
+    const dist = unitDist(attacker, defender);
+    const archerMeleePenalty = (attacker.unitType === 'archer' && dist <= MELEE_RANGE) ? 0.6 : 1.0;
+
+    // --- Low morale ---
+    const moraleMod = attacker.morale < 50 ? 0.8 : 1.0;
+
+    // Effective attack
+    const effectiveAttack = aStats.attack * chargeMult * flankMult * heightMult * archerMeleePenalty * moraleMod;
+
+    // Effective defense (terrain already applied in getEffectiveStats)
+    const effectiveDefense = dStats.defense * braceMult * archerDefMod;
+
+    let rawDamage = effectiveAttack - effectiveDefense;
+
+    // Forest reduces ranged damage
+    if (attacker.range > MELEE_RANGE && dist > MELEE_RANGE && defenderTerrain?.key === 'forest') {
+      rawDamage *= 0.7;
+    }
+
+    const randomFactor = 0.85 + Math.random() * 0.3; // 0.85 to 1.15
+
+    const finalDamage = Math.round(Math.max(1, rawDamage * randomFactor));
+
+    // Apply charge side-effects after damage calc
+    if (chargeTriggered) {
+      attacker.stamina = Math.max(0, attacker.stamina - CHARGE_STAMINA_COST);
+      attacker.chargeCooldown = CHARGE_COOLDOWN_MS;
+      attacker.chargeDistanceAccum = 0;
+      attacker.isCharging = false;
+
+      // Knockback
+      if (!braceNegatesKnockback) {
+        const dx = defender.x - attacker.x;
+        const dy = defender.y - attacker.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        defender.x += (dx / len) * CHARGE_KNOCKBACK_PX;
+        defender.y += (dy / len) * CHARGE_KNOCKBACK_PX;
+      }
+
+      // Morale penalty on target
+      defender.morale = Math.max(0, defender.morale - CHARGE_MORALE_PENALTY);
+      if (defender.morale < 25 && !defender.isRouting) {
+        defender.isRouting = true;
+        defender.attackTargetId = null;
+        this.emit({ type: 'unit_route', unit: defender });
+      }
+    }
+
+    return finalDamage;
   }
 
-  private getFlankBonus(attacker: Unit, defender: Unit): number {
+  /** Multiplicative flank bonus (design doc §10). */
+  private getFlankMultiplier(attacker: Unit, defender: Unit): number {
     const attackAngle = Math.atan2(
-      attacker.row - defender.row,
-      attacker.col - defender.col,
+      attacker.y - defender.y,
+      attacker.x - defender.x,
     );
 
     let angleDiff = Math.abs(attackAngle - defender.facingAngle);
     if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
 
-    if (angleDiff > 2.09) return 0.5;  // Rear: >120°
-    if (angleDiff > 1.05) return 0.3;  // Side: >60°
-    return 0;
-  }
-
-  private getBraceBonus(defender: Unit, attacker: Unit): number {
-    if (defender.unitType !== 'infantry' || attacker.unitType !== 'cavalry') return 0;
-    if (defender.isMoving) return 0;
-    const timeSinceMove = this.scene.time.now - defender.lastMoveTime;
-    return timeSinceMove >= 2000 ? 0.25 : 0;
+    if (angleDiff > 2.09) return 1.5;  // Rear: >120°
+    if (angleDiff > 1.05) return 1.3;  // Side: >60°
+    return 1.0;
   }
 
   private getHeightBonus(attacker: Unit, defender: Unit): number {
     const aTerrain = this.map.getTerrain(attacker.col, attacker.row);
     const dTerrain = this.map.getTerrain(defender.col, defender.row);
-    return (aTerrain?.key === 'hills' && dTerrain?.key !== 'hills') ? 0.15 : 0;
+    return (aTerrain?.key === 'hills' && dTerrain?.key !== 'hills') ? 1.15 : 1.0;
+  }
+
+  /** Archer proximity defense modifier (design doc §5). */
+  private getArcherProximityDefense(defender: Unit): number {
+    if (defender.unitType !== 'archer') return 1.0;
+
+    const units = this.unitSystem.getUnits();
+    let nearbyCount = 0;
+    for (const other of units) {
+      if (other === defender || !other.isAlive()) continue;
+      if (other.faction !== defender.faction) continue;
+      if (other.unitType === 'archer') continue;
+      if (unitDist(defender, other) <= NEARBY_RADIUS) {
+        nearbyCount++;
+      }
+    }
+
+    if (nearbyCount === 0) return 0.6;
+    return Math.min(1.0 + 0.2 * (nearbyCount - 1), 1.4);
   }
 
   hasLineOfSight(fromCol: number, fromRow: number, toCol: number, toRow: number): boolean {
@@ -261,8 +370,8 @@ export class CombatSystem {
       let nearbyEnemy = 0;
       for (const other of units) {
         if (other === unit || !other.isAlive()) continue;
-        const dist = Math.abs(unit.col - other.col) + Math.abs(unit.row - other.row);
-        if (dist <= 2) {
+        const dist = unitDist(unit, other);
+        if (dist <= NEARBY_RADIUS) {
           if (other.faction === unit.faction) nearbyFriendly++;
           else nearbyEnemy++;
         }
@@ -287,12 +396,34 @@ export class CombatSystem {
       let nearFriendly = false;
       for (const other of units) {
         if (other === unit || !other.isAlive() || other.faction !== unit.faction) continue;
-        const dist = Math.abs(unit.col - other.col) + Math.abs(unit.row - other.row);
-        if (dist <= 2) { nearFriendly = true; break; }
+        if (unitDist(unit, other) <= NEARBY_RADIUS) { nearFriendly = true; break; }
       }
 
       if (nearFriendly && unit.morale < 100) {
         unit.morale = Math.min(100, unit.morale + (delta / 1000) * 2);
+      }
+    }
+  }
+
+  /** Isolated archers lose morale at 3/s (design doc §5). */
+  private updateArcherIsolationMorale(delta: number): void {
+    const units = this.unitSystem.getUnits();
+    for (const unit of units) {
+      if (!unit.isAlive() || unit.isRouting || unit.unitType !== 'archer') continue;
+
+      let hasFriendlyNearby = false;
+      for (const other of units) {
+        if (other === unit || !other.isAlive() || other.faction !== unit.faction) continue;
+        if (unitDist(unit, other) <= ARCHER_ISOLATION_RADIUS) { hasFriendlyNearby = true; break; }
+      }
+
+      if (!hasFriendlyNearby) {
+        unit.morale = Math.max(0, unit.morale - (delta / 1000) * 3);
+        if (unit.morale < 25 && !unit.isRouting) {
+          unit.isRouting = true;
+          unit.attackTargetId = null;
+          this.emit({ type: 'unit_route', unit });
+        }
       }
     }
   }
@@ -303,12 +434,11 @@ export class CombatSystem {
     unit.attackTargetId = null;
     this.emit({ type: 'unit_death', unit });
 
-    // Morale penalty to nearby friendlies
+    // Morale penalty to nearby friendlies (192px)
     const units = this.unitSystem.getUnits();
     for (const other of units) {
       if (!other.isAlive() || other.faction !== unit.faction) continue;
-      const dist = Math.abs(other.col - unit.col) + Math.abs(other.row - unit.row);
-      if (dist <= 3) {
+      if (unitDist(other, unit) <= DEATH_MORALE_RADIUS) {
         other.morale = Math.max(0, other.morale - 10);
         if (other.morale < 25 && !other.isRouting) {
           other.isRouting = true;
@@ -333,14 +463,22 @@ export class CombatSystem {
   private updateRoutingUnits(): void {
     const units = [...this.unitSystem.getUnits()];
     for (const unit of units) {
-      if (!unit.isAlive() || !unit.isRouting || unit.isMoving) continue;
+      if (!unit.isAlive() || !unit.isRouting) continue;
+      // Skip if already has a flee target set
+      if (unit.targetX !== null && unit.targetY !== null) continue;
+
+      // Remove if already at map edge
+      if (unit.x < 0 || unit.x > this.map.mapWidthPx || unit.y < 0 || unit.y > this.map.mapHeightPx) {
+        this.removeRoutingUnit(unit);
+        continue;
+      }
 
       // Find nearest enemy to flee from
       let nearestDist = Infinity;
       let nearestEnemy: Unit | null = null;
       for (const other of this.unitSystem.getUnits()) {
         if (!other.isAlive() || other.faction === unit.faction) continue;
-        const dist = Math.abs(unit.col - other.col) + Math.abs(unit.row - other.row);
+        const dist = unitDist(unit, other);
         if (dist < nearestDist) {
           nearestDist = dist;
           nearestEnemy = other;
@@ -354,64 +492,16 @@ export class CombatSystem {
         continue;
       }
 
-      const dx = unit.col - nearestEnemy.col;
-      const dy = unit.row - nearestEnemy.row;
+      // Flee 128px away from nearest enemy
+      const dx = unit.x - nearestEnemy.x;
+      const dy = unit.y - nearestEnemy.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      unit.targetX = unit.x + (dx / len) * 128;
+      unit.targetY = unit.y + (dy / len) * 128;
 
-      // Sort directions by how much they flee from enemy
-      const dirs = [
-        { dc: 1, dr: 0 }, { dc: -1, dr: 0 },
-        { dc: 0, dr: 1 }, { dc: 0, dr: -1 },
-      ];
-      dirs.sort((a, b) => (b.dc * dx + b.dr * dy) - (a.dc * dx + a.dr * dy));
-
-      let fled = false;
-      for (const dir of dirs) {
-        const nc = unit.col + dir.dc;
-        const nr = unit.row + dir.dr;
-
-        if (!this.map.isInBounds(nc, nr)) {
-          this.removeRoutingUnit(unit);
-          fled = true;
-          break;
-        }
-
-        const terrain = this.map.getTerrain(nc, nr);
-        if (!terrain?.passable) continue;
-        if (this.unitSystem.getUnitAt(nc, nr)) continue;
-
-        this.animateRoutingMove(unit, nc, nr);
-        fled = true;
-        break;
-      }
-
-      if (!fled) {
-        // Cornered — just stay put
-      }
+      const visual = this.unitSystem.getVisual(unit);
+      if (visual) visual.container.setAlpha(0.6);
     }
-  }
-
-  private animateRoutingMove(unit: Unit, newCol: number, newRow: number): void {
-    const visual = this.unitSystem.getVisual(unit);
-    unit.col = newCol;
-    unit.row = newRow;
-    if (!visual) return;
-
-    const pos = this.map.gridToWorld(newCol, newRow);
-    unit.isMoving = true;
-    const jitterX = (Math.random() - 0.5) * 8;
-    const jitterY = (Math.random() - 0.5) * 8;
-
-    this.scene.tweens.add({
-      targets: visual.container,
-      x: pos.x + jitterX,
-      y: pos.y + jitterY,
-      duration: 200,
-      ease: 'Linear',
-      onComplete: () => {
-        unit.isMoving = false;
-        visual.container.setAlpha(0.6);
-      },
-    });
   }
 
   private removeRoutingUnit(unit: Unit): void {
@@ -542,19 +632,16 @@ export class CombatSystem {
       const target = units.find(u => u.id === unit.attackTargetId);
       if (!target || !target.isAlive()) continue;
 
-      const dist = Math.abs(unit.col - target.col) + Math.abs(unit.row - target.row);
-      if (dist > 1) continue;
+      const dist = unitDist(unit, target);
+      if (dist > MELEE_RANGE) continue;
 
       const pairKey = `${Math.min(unit.id, target.id)}:${Math.max(unit.id, target.id)}`;
       if (drawnPairs.has(pairKey)) continue;
       drawnPairs.add(pairKey);
 
-      const uv = this.unitSystem.getVisual(unit);
-      const tv = this.unitSystem.getVisual(target);
-      if (!uv || !tv) continue;
-
-      const mx = (uv.container.x + tv.container.x) / 2;
-      const my = (uv.container.y + tv.container.y) / 2;
+      // Position icon between the two units using world coords
+      const mx = (unit.x + target.x) / 2;
+      const my = (unit.y + target.y) / 2;
 
       const icon = this.scene.add.graphics();
       icon.setDepth(25);

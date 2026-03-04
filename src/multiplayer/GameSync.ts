@@ -16,15 +16,19 @@ export interface UnitSnapshot {
   id: number;
   unitType: string;
   faction: 'player' | 'enemy';
-  col: number;
-  row: number;
+  x: number;
+  y: number;
   hp: number;
   morale: number;
+  stamina: number;
   isRouting: boolean;
   attackTargetId: number | null;
   facingAngle: number;
   isMoving: boolean;
-  moved: boolean;
+  targetX: number | null;
+  targetY: number | null;
+  isBraced: boolean;
+  isCharging: boolean;
 }
 
 export interface GameMessage {
@@ -35,8 +39,8 @@ export interface GameMessage {
 
 export interface MovePayload {
   unitId: number;
-  targetCol: number;
-  targetRow: number;
+  targetX: number;
+  targetY: number;
 }
 
 export interface AttackPayload {
@@ -69,7 +73,7 @@ export interface GameSyncCallbacks {
 
 // --- GameSync ---
 
-const STATE_SYNC_INTERVAL = 5000;
+const STATE_SYNC_INTERVAL = 500;
 const PING_INTERVAL = 3000;
 
 export class GameSync {
@@ -133,8 +137,8 @@ export class GameSync {
     }
   }
 
-  sendMoveCommand(unitId: number, col: number, row: number): void {
-    const payload: MovePayload = { unitId, targetCol: col, targetRow: row };
+  sendMoveCommand(unitId: number, targetX: number, targetY: number): void {
+    const payload: MovePayload = { unitId, targetX, targetY };
     this.sendMessage('UNIT_MOVE', payload);
   }
 
@@ -187,15 +191,19 @@ export class GameSync {
       id: u.id,
       unitType: u.unitType,
       faction: u.faction,
-      col: u.col,
-      row: u.row,
+      x: u.x,
+      y: u.y,
       hp: u.hp,
       morale: u.morale,
+      stamina: u.stamina,
       isRouting: u.isRouting,
       attackTargetId: u.attackTargetId,
       facingAngle: u.facingAngle,
       isMoving: u.isMoving,
-      moved: u.moved,
+      targetX: u.targetX,
+      targetY: u.targetY,
+      isBraced: u.isBraced,
+      isCharging: u.isCharging,
     };
   }
 }

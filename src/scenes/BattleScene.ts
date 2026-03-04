@@ -343,17 +343,7 @@ export class BattleScene extends Phaser.Scene {
   private processRemoteMove(payload: MovePayload, expectedFaction: 'player' | 'enemy'): void {
     const unit = this.unitSystem.getUnits().find(u => u.id === payload.unitId);
     if (!unit || unit.faction !== expectedFaction || !unit.isAlive()) return;
-    if (unit.isMoving) return;
-
-    const path = this.movementSystem.findPath(
-      unit.col, unit.row,
-      payload.targetCol, payload.targetRow,
-      unit.faction,
-      this.unitSystem.getUnits(),
-    );
-    if (path.length >= 2) {
-      this.movementSystem.moveUnit(unit, path, this.unitSystem);
-    }
+    this.movementSystem.setTarget(unit, payload.targetX, payload.targetY);
   }
 
   private processRemoteAttack(payload: AttackPayload, expectedFaction: 'player' | 'enemy'): void {
@@ -371,23 +361,26 @@ export class BattleScene extends Phaser.Scene {
     for (const snap of payload.units) {
       const unit = this.unitSystem.getUnits().find(u => u.id === snap.id);
       if (!unit) continue;
-      // Don't correct position if unit is currently animating
+      // Apply authoritative position — sync movement state first
+      unit.isMoving = snap.isMoving;
       if (!unit.isMoving) {
-        unit.col = snap.col;
-        unit.row = snap.row;
-        // Update visual position
+        unit.x = snap.x;
+        unit.y = snap.y;
         const visual = this.unitSystem.getVisual(unit);
         if (visual) {
-          const pos = this.mapSystem.gridToWorld(snap.col, snap.row);
-          visual.container.setPosition(pos.x, pos.y);
+          visual.container.setPosition(snap.x, snap.y);
         }
       }
       unit.hp = snap.hp;
       unit.morale = snap.morale;
+      unit.stamina = snap.stamina;
       unit.isRouting = snap.isRouting;
       unit.attackTargetId = snap.attackTargetId;
       unit.facingAngle = snap.facingAngle;
-      unit.moved = snap.moved;
+      unit.targetX = snap.targetX;
+      unit.targetY = snap.targetY;
+      unit.isBraced = snap.isBraced;
+      unit.isCharging = snap.isCharging;
       this.unitSystem.updateHealthBar(unit);
     }
 

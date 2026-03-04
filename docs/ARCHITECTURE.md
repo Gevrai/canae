@@ -41,10 +41,10 @@ Systems encapsulate game logic and run within `BattleScene`. Each system is a cl
 |---|---|
 | **MapSystem** | Procedurally generates a 30×20 tile map using Perlin-like noise. Places terrain (grass, hills, forest), carves a river, and draws a road. Renders tiles with a parchment aesthetic. |
 | **UnitSystem** | Creates and destroys units. Manages unit visuals (colored blocks with type icons), health bars, and selection glow. Sets up initial armies (4 infantry + 2 cavalry + 2 archers per side). |
-| **MovementSystem** | A\* pathfinding that respects terrain movement costs and enemy unit blocking. Computes reachable tiles for movement overlays. Animates unit movement with tweens and facing angles. |
-| **SelectionSystem** | Handles pointer input for selecting units, displaying movement/attack overlays, previewing paths on hover, and issuing move/attack commands. Syncs commands in multiplayer. |
-| **CombatSystem** | Resolves melee and ranged combat. Calculates damage from attack/defense stats, terrain bonuses, and situational modifiers (flanking, charging, height advantage, bracing). Manages morale, routing, auto-engagement, death, and visual effects (damage numbers, projectiles, hit flashes). |
-| **AISystem** | Controls enemy units with difficulty-scaled tactics. Evaluates tactical decisions (attack, hold, flank, retreat, support) based on unit advantages, morale, and battlefield position. Uses a seeded RNG for reproducible behavior. |
+| **MovementSystem** | Continuous per-frame movement toward target (x, y) world coordinates. No pathfinding; units move at speed defined by unit type and terrain. Drains stamina based on terrain (via `speedMultiplier` and `staminaDrainMultiplier`). Recovers stamina when idle. Handles collision detection with other units. |
+| **SelectionSystem** | Handles pointer input for selecting units and click-to-move commands (world coordinates). No reachable tile overlay. Displays attack overlays. Syncs commands in multiplayer. |
+| **CombatSystem** | Resolves melee and ranged combat. Calculates damage from attack/defense stats and situational modifiers: **cavalry charge** (1.5× when moving fast into enemy), **infantry brace** (1.35× defense when stationary ≥2s), **archer proximity** (bonus near friendlies, penalty when isolated). Stamina below 50% reduces stats. Manages morale, routing, auto-engagement, death, and visual effects. |
+| **AISystem** | Controls enemy units with difficulty-scaled tactics. Evaluates decisions (attack, hold, flank, retreat, support) using Euclidean distance and unit advantages. Calls `setTarget()` to command movement. Uses a seeded RNG for reproducible behavior. |
 | **CameraSystem** | Pans and zooms the viewport via keyboard, mouse drag, and pinch gestures. Clamps to map bounds. Zoom range: 0.4×–2×. |
 | **AudioSystem** | Synthesizes sound effects using the Web Audio API — sword clashes, arrow launches, unit deaths, selection clicks, and victory/defeat fanfares. Respects the sound setting from `localStorage`. |
 
@@ -68,8 +68,9 @@ MapSystem ──────terrain data──▶ MovementSystem (pathfinding co
 
 Core data class representing a single unit on the battlefield.
 
-- **Properties:** id, type, faction, position, hp, attack, defense, speed, movement, range, morale, sightRange, status flags (charging, braced, routing, inCombat)
-- **Key methods:** `takeDamage()`, `heal()`, `isAlive()`, `getEffectiveStats(terrain)` (applies terrain modifiers), `resetTurn()`
+- **Properties:** id, type, faction, x, y (world coordinates), hp, stamina, attack, defense, speed, range, morale, sightRange, brace, charge, collision radius; col/row are computed getters
+- **Status flags:** charging (fast movement into enemy), braced (stationary ≥2s, +defense), routing, inCombat
+- **Key methods:** `takeDamage()`, `heal()`, `isAlive()`, `setTarget(x, y)` (command movement), `updateStamina(delta, terrain)` (drain/recover based on movement and terrain), `getEffectiveStats()` (applies stamina/brace/charge modifiers)
 
 ### Terrain
 
@@ -84,8 +85,8 @@ All game constants and data-driven definitions live in `src/config/`.
 | File | Contents |
 |---|---|
 | `game.config.ts` | Canvas size (1280×720), tile size (64px), map dimensions (30×20), camera speed, turn time limit |
-| `units.config.ts` | Stats for Infantry, Cavalry, Archer. Faction colors (brown for player, purple for enemy). |
-| `terrain.config.ts` | Six terrain types with movement costs and defense bonuses. Water is impassable. |
+| `units.config.ts` | Stats for Infantry, Cavalry, Archer: hp, attack, defense, speed (px/s), range (px), stamina (max resource), collision radius. Faction colors. |
+| `terrain.config.ts` | Six terrain types: movementCost (deprecated), speedMultiplier (% of unit speed), staminaDrainMultiplier (% drain per px moved), defenseModifier, blocksLineOfSight, isPassable. |
 | `settings.ts` | Loads/saves user preferences (difficulty, sound, fullscreen) to `localStorage`. |
 
 ## Data Flow
@@ -142,9 +143,9 @@ Canae uses a **host-authoritative** model over WebRTC peer-to-peer connections.
 | Message | Direction | Purpose |
 |---|---|---|
 | `GAME_START` | Host → Guest | Start game with shared map seed |
-| `UNIT_MOVE` | Both | Player issued a move command |
+| `UNIT_MOVE` | Both | Player issued a move command (world coordinates) |
 | `UNIT_ATTACK` | Both | Player issued an attack command |
-| `STATE_SYNC` | Host → Guest | Periodic full unit state snapshot for consistency |
+| `STATE_SYNC` | Host → Guest | Periodic full unit state snapshot: position (x, y), stamina, brace/charge state |
 | `GAME_OVER` | Host → Guest | Game result |
 | `PING` / `PONG` | Both | Latency measurement |
 
