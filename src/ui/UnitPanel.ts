@@ -9,13 +9,13 @@ export class UnitPanel {
     this.scene = scene;
   }
 
-  show(unit: Unit, terrainName: string | null, terrainBonus: number): void {
+  show(unit: Unit, terrainName: string | null, terrainBonus: number, terrainSpeed: number = 1.0): void {
     this.hide();
 
     const { width, height } = this.scene.scale;
     const compact = width < 500;
     const pw = compact ? width - 16 : 360;
-    const ph = compact ? 110 : 130;
+    const ph = compact ? 125 : 145;
     const px = compact ? 8 : (width - pw) / 2;
     const py = height - ph - 8;
 
@@ -83,6 +83,22 @@ export class UnitPanel {
       fontFamily: 'Georgia, serif',
     }));
 
+    // Stamina bar
+    const stamY = morY + barH + 2;
+    const stamRatio = unit.stamina / unit.maxStamina;
+    const stamG = this.scene.add.graphics();
+    stamG.fillStyle(0x333333, 0.8);
+    stamG.fillRoundedRect(hpX, stamY, barW, barH - 2, 3);
+    stamG.fillStyle(0x4488cc, 0.9);
+    stamG.fillRoundedRect(hpX, stamY, Math.max(4, barW * stamRatio), barH - 2, 3);
+    this.container.add(stamG);
+
+    this.container.add(this.scene.add.text(hpX + barW + 6, stamY - 2, `Stamina: ${Math.round(unit.stamina)}/${unit.maxStamina}`, {
+      fontSize: smallFont,
+      color: '#88aacc',
+      fontFamily: 'Georgia, serif',
+    }));
+
     // Stats column (right side)
     const statsX = compact ? px + pw - 100 : px + pw / 2 + 30;
     const statsY = py + 12;
@@ -102,12 +118,10 @@ export class UnitPanel {
     const statusY = py + ph - (compact ? 24 : 28);
     const statuses: string[] = [];
     if (unit.hasChargeBonus) statuses.push('Charging');
+    if (unit.isCharging) statuses.push('⚡ Charge');
+    if (unit.isBraced) statuses.push('🛡 Braced');
     if (unit.isRouting) statuses.push('Routing');
     if (unit.attackTargetId) statuses.push('In Combat');
-    if (!unit.isMoving && !unit.attackTargetId && !unit.isRouting) {
-      const timeSince = this.scene.time.now - unit.lastMoveTime;
-      if (timeSince >= 2000 && unit.unitType === 'infantry') statuses.push('Braced');
-    }
 
     if (statuses.length > 0) {
       this.container.add(this.scene.add.text(lx, statusY, statuses.join(' · '), {
@@ -121,7 +135,8 @@ export class UnitPanel {
     // Terrain info
     if (terrainName) {
       const bonusStr = terrainBonus > 0 ? ` (+${Math.round(terrainBonus * 100)}% DEF)` : '';
-      this.container.add(this.scene.add.text(statsX, statusY, `📍 ${terrainName}${bonusStr}`, {
+      const speedStr = terrainSpeed !== 1.0 ? ` · ${Math.round(terrainSpeed * 100)}% SPD` : '';
+      this.container.add(this.scene.add.text(statsX, statusY, `📍 ${terrainName}${bonusStr}${speedStr}`, {
         fontSize: smallFont,
         color: '#a0b898',
         fontFamily: 'Georgia, serif',

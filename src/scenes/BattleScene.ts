@@ -217,6 +217,7 @@ export class BattleScene extends Phaser.Scene {
 
     if (this.phase === 'battle') {
       this.battleTime += delta;
+      this.movementSystem.update(delta, this.unitSystem.getUnits());
       this.combatSystem.update(delta);
 
       // Only run AI in solo mode
@@ -497,6 +498,7 @@ export class BattleScene extends Phaser.Scene {
         selected,
         terrain?.name ?? null,
         terrain?.defenseBonus ?? 0,
+        terrain?.speedMultiplier ?? 1.0,
       );
     } else {
       this.hud.showUnit(null, null, 0);

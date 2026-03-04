@@ -267,7 +267,7 @@ export class MapSystem {
   }
 
   private drawGridLines(g: Phaser.GameObjects.Graphics): void {
-    g.lineStyle(1, 0xbaa888, 0.15);
+    g.lineStyle(1, 0xbaa888, 0.06);
     for (let c = 0; c <= MAP_COLS; c++) {
       const x = c * TILE_SIZE + MAP_MARGIN;
       g.beginPath();

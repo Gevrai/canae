@@ -12,7 +12,10 @@ export interface UnitVisual {
   container: Phaser.GameObjects.Container;
   block: Phaser.GameObjects.Graphics;
   healthBar: Phaser.GameObjects.Graphics;
+  staminaBar: Phaser.GameObjects.Graphics;
   glow: Phaser.GameObjects.Graphics;
+  braceIcon: Phaser.GameObjects.Graphics;
+  chargeTrail: Phaser.GameObjects.Graphics;
 }
 
 export class UnitSystem {
@@ -54,14 +57,25 @@ export class UnitSystem {
     return this.units.find(u => u.col === col && u.row === row && u.isAlive());
   }
 
+  getUnitAtWorld(wx: number, wy: number, radius: number = 30): Unit | undefined {
+    return this.units.find(u => {
+      if (!u.isAlive()) return false;
+      const dx = u.x - wx;
+      const dy = u.y - wy;
+      return Math.sqrt(dx * dx + dy * dy) <= (u.collisionRadius + radius);
+    });
+  }
+
   getUnitsByFaction(faction: Faction): Unit[] {
     return this.units.filter(u => u.faction === faction && u.isAlive());
   }
 
-  getUnitsInRange(col: number, row: number, range: number): Unit[] {
+  getUnitsInRange(x: number, y: number, range: number): Unit[] {
     return this.units.filter(u => {
       if (!u.isAlive()) return false;
-      const dist = Math.abs(u.col - col) + Math.abs(u.row - row);
+      const dx = u.x - x;
+      const dy = u.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
       return dist <= range && dist > 0;
     });
   }
@@ -84,8 +98,28 @@ export class UnitSystem {
     this.drawHealthBar(visual.healthBar, unit);
   }
 
+  updateStaminaBar(unit: Unit): void {
+    const visual = this.visuals.get(unit.id);
+    if (!visual) return;
+    this.drawStaminaBar(visual.staminaBar, unit);
+  }
+
   update(_delta: number): void {
-    // Future: animated idle, bobbing, etc.
+    for (const unit of this.units) {
+      if (!unit.isAlive()) continue;
+      const visual = this.visuals.get(unit.id);
+      if (visual) {
+        visual.container.setPosition(unit.x, unit.y);
+        this.drawStaminaBar(visual.staminaBar, unit);
+        this.drawHealthBar(visual.healthBar, unit);
+
+        // Brace indicator (infantry)
+        visual.braceIcon.setVisible(unit.isBraced);
+
+        // Charge trail (cavalry)
+        this.updateChargeTrail(visual.chargeTrail, unit);
+      }
+    }
   }
 
   setupInitialArmies(): void {
@@ -146,12 +180,24 @@ export class UnitSystem {
     this.drawHealthBar(healthBar, unit);
     container.add(healthBar);
 
+    const staminaBar = this.scene.add.graphics();
+    this.drawStaminaBar(staminaBar, unit);
+    container.add(staminaBar);
+
     const glow = this.scene.add.graphics();
     this.drawSelectionGlow(glow);
     glow.setVisible(false);
     container.add(glow);
 
-    this.visuals.set(unit.id, { container, block, healthBar, glow });
+    const braceIcon = this.scene.add.graphics();
+    this.drawBraceIcon(braceIcon);
+    braceIcon.setVisible(false);
+    container.add(braceIcon);
+
+    const chargeTrail = this.scene.add.graphics();
+    container.add(chargeTrail);
+
+    this.visuals.set(unit.id, { container, block, healthBar, staminaBar, glow, braceIcon, chargeTrail });
   }
 
   private drawUnitBlock(g: Phaser.GameObjects.Graphics, unit: Unit): void {
@@ -241,5 +287,59 @@ export class UnitSystem {
     }
     g.lineStyle(2, 0xffd700, 0.8);
     g.strokeRect(-hw, -hh, hw * 2, hh * 2);
+  }
+
+  private drawStaminaBar(g: Phaser.GameObjects.Graphics, unit: Unit): void {
+    g.clear();
+    const hw = BLOCK_W / 2;
+    const barY = BLOCK_H / 2 + 3 + 3 + 2; // below health bar (barH=3) + gap
+    const barH = 2;
+    const ratio = unit.stamina / unit.maxStamina;
+
+    g.fillStyle(0x333333, 0.8);
+    g.fillRect(-hw, barY, BLOCK_W, barH);
+
+    g.fillStyle(0x4488cc, 0.9);
+    g.fillRect(-hw, barY, Math.floor(BLOCK_W * ratio), barH);
+  }
+
+  private drawBraceIcon(g: Phaser.GameObjects.Graphics): void {
+    g.clear();
+    // Small gold shield shape above the unit
+    const cy = -BLOCK_H / 2 - 10;
+    g.fillStyle(0xffd700, 0.85);
+    g.beginPath();
+    g.moveTo(-5, cy - 4);
+    g.lineTo(5, cy - 4);
+    g.lineTo(5, cy + 2);
+    g.lineTo(0, cy + 6);
+    g.lineTo(-5, cy + 2);
+    g.closePath();
+    g.fillPath();
+    g.lineStyle(1, 0x8b6914, 0.9);
+    g.strokePath();
+  }
+
+  private updateChargeTrail(g: Phaser.GameObjects.Graphics, unit: Unit): void {
+    g.clear();
+    if (!unit.isCharging) return;
+
+    // Speed lines behind the unit opposite to facing direction
+    const angle = unit.facingAngle + Math.PI;
+    for (let i = 0; i < 3; i++) {
+      const spread = (i - 1) * 0.3;
+      const a = angle + spread;
+      const startDist = 12 + i * 3;
+      const endDist = 22 + i * 4;
+      const sx = Math.cos(a) * startDist;
+      const sy = Math.sin(a) * startDist;
+      const ex = Math.cos(a) * endDist;
+      const ey = Math.sin(a) * endDist;
+      g.lineStyle(1.5, 0xffd700, 0.5 - i * 0.12);
+      g.beginPath();
+      g.moveTo(sx, sy);
+      g.lineTo(ex, ey);
+      g.strokePath();
+    }
   }
 }

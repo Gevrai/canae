@@ -107,9 +107,9 @@ export class HUD {
     );
   }
 
-  showUnit(unit: Unit | null, terrain: string | null, terrainBonus: number): void {
+  showUnit(unit: Unit | null, terrain: string | null, terrainBonus: number, terrainSpeed: number = 1.0): void {
     if (unit) {
-      this.unitPanel.show(unit, terrain, terrainBonus);
+      this.unitPanel.show(unit, terrain, terrainBonus, terrainSpeed);
     } else {
       this.unitPanel.hide();
     }
