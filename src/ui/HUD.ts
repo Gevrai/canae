@@ -16,6 +16,9 @@ export class HUD {
   private unitSystem!: UnitSystem;
   private map!: MapSystem;
 
+  // Root container for all HUD elements (zoom-compensated)
+  private root!: Phaser.GameObjects.Container;
+
   // Top bar
   private topBar!: Phaser.GameObjects.Graphics;
   private playerCountText!: Phaser.GameObjects.Text;
@@ -31,6 +34,7 @@ export class HUD {
   private minimapGraphics!: Phaser.GameObjects.Graphics;
   private minimapUnits!: Phaser.GameObjects.Graphics;
   private minimapViewport!: Phaser.GameObjects.Graphics;
+  private minimapHitZone!: Phaser.GameObjects.Zone;
   private readonly MINIMAP_W = 160;
   private readonly MINIMAP_H = 107;
   private readonly MINIMAP_MARGIN = 8;
@@ -65,6 +69,9 @@ export class HUD {
     this.playerTotal = unitSystem.getUnitsByFaction('player').length;
     this.enemyTotal = unitSystem.getUnitsByFaction('enemy').length;
 
+    // Root container: scrollFactor(0) + zoom compensation in update()
+    this.root = this.scene.add.container(0, 0).setScrollFactor(0).setDepth(200);
+
     this.createTopBar();
     this.unitPanel = new UnitPanel(this.scene);
     this.createMinimap();
@@ -74,9 +81,30 @@ export class HUD {
 
   update(delta: number): void {
     this.battleTime += delta;
+
+    // Compensate for camera zoom so HUD stays fixed on screen
+    this.compensateZoom(this.root);
+    const panelContainer = this.unitPanel.getContainer();
+    if (panelContainer) {
+      this.compensateZoom(panelContainer);
+    }
+
     this.updateTopBar();
     this.updateMinimap();
     this.updateCombatLogFade();
+  }
+
+  /** Adjust a scrollFactor(0) container to counteract camera zoom. */
+  private compensateZoom(container: Phaser.GameObjects.Container): void {
+    const cam = this.scene.cameras.main;
+    const z = cam.zoom;
+    const w = cam.width;
+    const h = cam.height;
+    container.setScale(1 / z);
+    container.setPosition(
+      -w / 2 * (1 - z) / z,
+      -h / 2 * (1 - z) / z,
+    );
   }
 
   showUnit(unit: Unit | null, terrain: string | null, terrainBonus: number): void {
@@ -96,15 +124,9 @@ export class HUD {
   }
 
   destroy(): void {
-    this.topBar?.destroy();
-    this.playerCountText?.destroy();
-    this.enemyCountText?.destroy();
-    this.timerText?.destroy();
     this.unitPanel?.hide();
-    this.minimapContainer?.destroy();
-    for (const t of this.logTexts) t.destroy();
     this.logTexts = [];
-    this.fsBtn?.destroy();
+    this.root?.destroy();
   }
 
   // --- Top Bar ---
@@ -112,7 +134,7 @@ export class HUD {
     const w = this.scene.scale.width;
     const barH = 36;
 
-    this.topBar = this.scene.add.graphics().setScrollFactor(0).setDepth(200);
+    this.topBar = this.scene.add.graphics();
     this.topBar.fillStyle(0x1a1a1a, 0.65);
     this.topBar.fillRect(0, 0, w, barH);
     this.topBar.lineStyle(1, 0x8b7355, 0.4);
@@ -120,6 +142,7 @@ export class HUD {
     this.topBar.moveTo(0, barH);
     this.topBar.lineTo(w, barH);
     this.topBar.strokePath();
+    this.root.add(this.topBar);
 
     const fontSize = this.compact ? '13px' : '15px';
 
@@ -127,19 +150,22 @@ export class HUD {
       fontSize,
       color: '#e8a0a0',
       fontFamily: 'Georgia, serif',
-    }).setScrollFactor(0).setDepth(201);
+    });
+    this.root.add(this.playerCountText);
 
     this.enemyCountText = this.scene.add.text(this.compact ? 140 : 200, 8, '', {
       fontSize,
       color: '#b8a0d0',
       fontFamily: 'Georgia, serif',
-    }).setScrollFactor(0).setDepth(201);
+    });
+    this.root.add(this.enemyCountText);
 
     this.timerText = this.scene.add.text(w / 2, 8, '', {
       fontSize,
       color: '#d0c8b0',
       fontFamily: 'Georgia, serif',
-    }).setScrollFactor(0).setDepth(201).setOrigin(0.5, 0);
+    }).setOrigin(0.5, 0);
+    this.root.add(this.timerText);
   }
 
   private updateTopBar(): void {
@@ -162,7 +188,7 @@ export class HUD {
     const mx = sw - this.MINIMAP_W - this.MINIMAP_MARGIN;
     const my = sh - this.MINIMAP_H - this.MINIMAP_MARGIN;
 
-    this.minimapContainer = this.scene.add.container(mx, my).setScrollFactor(0).setDepth(200);
+    this.minimapContainer = this.scene.add.container(mx, my);
 
     // Background
     const bg = this.scene.add.graphics();
@@ -185,15 +211,18 @@ export class HUD {
     this.minimapViewport = this.scene.add.graphics();
     this.minimapContainer.add(this.minimapViewport);
 
+    this.root.add(this.minimapContainer);
+
     // Make minimap tappable for quick-pan
-    const hitZone = this.scene.add.zone(
+    this.minimapHitZone = this.scene.add.zone(
       mx + this.MINIMAP_W / 2,
       my + this.MINIMAP_H / 2,
       this.MINIMAP_W,
       this.MINIMAP_H,
-    ).setScrollFactor(0).setDepth(201).setInteractive();
+    ).setInteractive();
+    this.root.add(this.minimapHitZone);
 
-    hitZone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+    this.minimapHitZone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       const localX = pointer.x - mx;
       const localY = pointer.y - my;
       const worldX = (localX / this.MINIMAP_W) * (MAP_COLS * TILE_SIZE + MAP_MARGIN * 2);
@@ -266,7 +295,8 @@ export class HUD {
         color: '#d0c8b0',
         fontFamily: 'Georgia, serif',
         wordWrap: { width: this.compact ? 200 : 280 },
-      }).setScrollFactor(0).setDepth(200).setOrigin(1, 0).setAlpha(alpha);
+      }).setOrigin(1, 0).setAlpha(alpha);
+      this.root.add(txt);
 
       this.logTexts.push(txt);
     }
@@ -303,7 +333,8 @@ export class HUD {
       fontSize: '20px',
       color: '#d0c8b0',
       fontFamily: 'sans-serif',
-    }).setScrollFactor(0).setDepth(201).setInteractive({ useHandCursor: true });
+    }).setInteractive({ useHandCursor: true });
+    this.root.add(this.fsBtn);
 
     this.fsBtn.on('pointerdown', () => {
       if (document.fullscreenElement) {

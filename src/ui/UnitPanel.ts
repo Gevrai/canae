@@ -43,7 +43,7 @@ export class UnitPanel {
       color: '#e8d8c0',
       fontFamily: 'Georgia, serif',
       fontStyle: 'bold',
-    }).setScrollFactor(0));
+    }));
 
     // Health bar
     const hpX = lx + 38;
@@ -65,7 +65,7 @@ export class UnitPanel {
       fontSize: smallFont,
       color: '#cccccc',
       fontFamily: 'Georgia, serif',
-    }).setScrollFactor(0));
+    }));
 
     // Morale bar
     const morY = hpY + barH + 4;
@@ -81,7 +81,7 @@ export class UnitPanel {
       fontSize: smallFont,
       color: '#aaaacc',
       fontFamily: 'Georgia, serif',
-    }).setScrollFactor(0));
+    }));
 
     // Stats column (right side)
     const statsX = compact ? px + pw - 100 : px + pw / 2 + 30;
@@ -96,7 +96,7 @@ export class UnitPanel {
       color: '#c8c0a8',
       fontFamily: 'Georgia, serif',
       lineSpacing: 4,
-    }).setScrollFactor(0));
+    }));
 
     // Status effects
     const statusY = py + ph - (compact ? 24 : 28);
@@ -115,7 +115,7 @@ export class UnitPanel {
         color: unit.isRouting ? '#ff6666' : '#ffd700',
         fontFamily: 'Georgia, serif',
         fontStyle: 'italic',
-      }).setScrollFactor(0));
+      }));
     }
 
     // Terrain info
@@ -125,7 +125,7 @@ export class UnitPanel {
         fontSize: smallFont,
         color: '#a0b898',
         fontFamily: 'Georgia, serif',
-      }).setScrollFactor(0));
+      }));
     }
 
     // Dismiss button
@@ -133,7 +133,7 @@ export class UnitPanel {
       fontSize: '18px',
       color: '#a09080',
       fontFamily: 'sans-serif',
-    }).setOrigin(1, 0).setScrollFactor(0).setInteractive({ useHandCursor: true });
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     dismissBtn.on('pointerdown', () => {
       this.scene.events.emit('hud:dismiss');
     });
@@ -143,6 +143,11 @@ export class UnitPanel {
   hide(): void {
     this.container?.destroy();
     this.container = null;
+  }
+
+  /** Get the current container for zoom compensation. */
+  getContainer(): Phaser.GameObjects.Container | null {
+    return this.container;
   }
 
   private drawUnitIcon(g: Phaser.GameObjects.Graphics, type: string, cx: number, cy: number): void {
