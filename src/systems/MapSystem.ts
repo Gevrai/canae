@@ -336,6 +336,12 @@ export class MapSystem {
     return this.grid[row]?.[col]?.def ?? null;
   }
 
+  getTerrainAtWorld(x: number, y: number): TerrainDef | null {
+    const col = Math.floor((x - MAP_MARGIN) / TILE_SIZE);
+    const row = Math.floor((y - MAP_MARGIN) / TILE_SIZE);
+    return this.getTerrain(col, row);
+  }
+
   getTerrainEntity(col: number, row: number): Terrain | null {
     return this.grid[row]?.[col] ?? null;
   }

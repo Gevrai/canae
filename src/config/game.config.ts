@@ -4,6 +4,5 @@ export const TILE_SIZE = 64;
 export const MAP_COLS = 30;
 export const MAP_ROWS = 20;
 export const CAMERA_SPEED = 10;
-export const TURN_TIME_LIMIT = 60;
 export const PARCHMENT_BG = 0xe8dcc8;
 export const MAP_MARGIN = 32;
